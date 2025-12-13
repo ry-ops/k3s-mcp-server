@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "k3s": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/ryandahlberg/Projects/k3s-mcp-server",
+        "run",
+        "k3s-mcp-server"
+      ],
+      "env": {
+        "KUBECONFIG": "/Users/ryandahlberg/.kube/k3s-cortex-config.yaml"
+      }
+    }
+  }
+}
