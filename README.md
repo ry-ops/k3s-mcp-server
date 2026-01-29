@@ -1,10 +1,16 @@
 # K3s MCP Server
 
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![uv](https://img.shields.io/badge/uv-latest-green.svg)](https://github.com/astral-sh/uv)
-[![MCP](https://img.shields.io/badge/MCP-1.0-purple.svg)](https://modelcontextprotocol.io/)
-[![K3s](https://img.shields.io/badge/K3s-Adopter-orange.svg)](https://k3s.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p align="center">
+  <img src="assets/cortex-fabric.svg" alt="Cortex Platform - AI-Native K3s Infrastructure" width="700"/>
+</p>
+
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python"></a>
+  <a href="https://github.com/astral-sh/uv"><img src="https://img.shields.io/badge/uv-latest-green.svg" alt="uv"></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-1.0-purple.svg" alt="MCP"></a>
+  <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-Adopter-orange.svg" alt="K3s"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
 A Model Context Protocol (MCP) server for managing Kubernetes (K3s) clusters. This server enables AI assistants like Claude to manage K3s clusters through natural language, and serves as the foundation for **Cortex Platform** - an AI-native infrastructure orchestration system.
 

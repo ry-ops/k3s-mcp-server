@@ -1,0 +1,375 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f0f23"/>
+      <stop offset="100%" style="stop-color:#1a1a3e"/>
+    </linearGradient>
+
+    <linearGradient id="activatorGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+
+    <linearGradient id="qdrantGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#06b6d4"/>
+      <stop offset="100%" style="stop-color:#0891b2"/>
+    </linearGradient>
+
+    <linearGradient id="reasoningGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f59e0b"/>
+      <stop offset="100%" style="stop-color:#d97706"/>
+    </linearGradient>
+
+    <linearGradient id="executionGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981"/>
+      <stop offset="100%" style="stop-color:#059669"/>
+    </linearGradient>
+
+    <linearGradient id="telemetryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ec4899"/>
+      <stop offset="100%" style="stop-color:#db2777"/>
+    </linearGradient>
+
+    <linearGradient id="pulseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:0"/>
+      <stop offset="50%" style="stop-color:#6366f1;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#6366f1;stop-opacity:0"/>
+    </linearGradient>
+
+    <!-- Glow filters -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Node pattern -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="20" cy="20" r="1" fill="#ffffff" opacity="0.1"/>
+    </pattern>
+
+    <!-- Hexagon for nodes -->
+    <polygon id="hexagon" points="30,0 60,17 60,52 30,69 0,52 0,17" fill="none" stroke-width="2"/>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="500" fill="url(#bgGrad)"/>
+  <rect width="800" height="500" fill="url(#grid)"/>
+
+  <!-- Ambient particles -->
+  <g opacity="0.4">
+    <circle cx="50" cy="80" r="2" fill="#6366f1">
+      <animate attributeName="cy" values="80;70;80" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="750" cy="120" r="1.5" fill="#06b6d4">
+      <animate attributeName="cy" values="120;110;120" dur="3s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.3;0.7;0.3" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="100" cy="400" r="2" fill="#10b981">
+      <animate attributeName="cy" values="400;390;400" dur="5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="5s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="700" cy="420" r="1.5" fill="#f59e0b">
+      <animate attributeName="cy" values="420;410;420" dur="4.5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.3;0.6;0.3" dur="4.5s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- Central Cortex Brain / Activator -->
+  <g transform="translate(400, 130)" filter="url(#softGlow)">
+    <!-- Outer ring pulse -->
+    <circle cx="0" cy="0" r="55" fill="none" stroke="#6366f1" stroke-width="1" opacity="0.3">
+      <animate attributeName="r" values="55;70;55" dur="3s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.3;0;0.3" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="0" cy="0" r="55" fill="none" stroke="#8b5cf6" stroke-width="1" opacity="0.3">
+      <animate attributeName="r" values="55;70;55" dur="3s" begin="1s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.3;0;0.3" dur="3s" begin="1s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- Main activator hexagon -->
+    <g transform="translate(-35, -40)">
+      <use href="#hexagon" stroke="url(#activatorGrad)" transform="scale(1.15)">
+        <animate attributeName="stroke-opacity" values="0.8;1;0.8" dur="2s" repeatCount="indefinite"/>
+      </use>
+      <polygon points="30,0 60,17 60,52 30,69 0,52 0,17" fill="url(#activatorGrad)" opacity="0.3"/>
+    </g>
+
+    <!-- Inner neural network -->
+    <g stroke="#a5b4fc" stroke-width="1" opacity="0.6">
+      <line x1="-15" y1="-10" x2="15" y2="-10">
+        <animate attributeName="opacity" values="0.4;0.9;0.4" dur="1.5s" repeatCount="indefinite"/>
+      </line>
+      <line x1="-15" y1="0" x2="15" y2="0">
+        <animate attributeName="opacity" values="0.4;0.9;0.4" dur="1.5s" begin="0.3s" repeatCount="indefinite"/>
+      </line>
+      <line x1="-15" y1="10" x2="15" y2="10">
+        <animate attributeName="opacity" values="0.4;0.9;0.4" dur="1.5s" begin="0.6s" repeatCount="indefinite"/>
+      </line>
+      <line x1="-10" y1="-15" x2="-10" y2="15"/>
+      <line x1="0" y1="-15" x2="0" y2="15"/>
+      <line x1="10" y1="-15" x2="10" y2="15"/>
+    </g>
+
+    <!-- Neural dots -->
+    <g fill="#e0e7ff">
+      <circle cx="-10" cy="-10" r="3">
+        <animate attributeName="fill" values="#e0e7ff;#6366f1;#e0e7ff" dur="2s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="10" cy="-10" r="3">
+        <animate attributeName="fill" values="#e0e7ff;#6366f1;#e0e7ff" dur="2s" begin="0.4s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="0" cy="0" r="4">
+        <animate attributeName="fill" values="#e0e7ff;#8b5cf6;#e0e7ff" dur="1.5s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="-10" cy="10" r="3">
+        <animate attributeName="fill" values="#e0e7ff;#6366f1;#e0e7ff" dur="2s" begin="0.8s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="10" cy="10" r="3">
+        <animate attributeName="fill" values="#e0e7ff;#6366f1;#e0e7ff" dur="2s" begin="1.2s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+  </g>
+
+  <!-- Qdrant Vector Memory (left of activator) -->
+  <g transform="translate(180, 130)" filter="url(#glow)">
+    <!-- Connecting line to activator -->
+    <line x1="50" y1="0" x2="175" y2="0" stroke="#06b6d4" stroke-width="2" stroke-dasharray="5,5">
+      <animate attributeName="stroke-dashoffset" values="0;-20" dur="1s" repeatCount="indefinite"/>
+    </line>
+
+    <!-- Vector DB representation -->
+    <g transform="translate(-30, -35)">
+      <use href="#hexagon" stroke="url(#qdrantGrad)" transform="scale(0.9)"/>
+      <polygon points="30,0 60,17 60,52 30,69 0,52 0,17" fill="url(#qdrantGrad)" opacity="0.2" transform="scale(0.9)"/>
+    </g>
+
+    <!-- Vector dots inside -->
+    <g fill="#22d3ee">
+      <circle cx="-8" cy="-8" r="2">
+        <animate attributeName="r" values="2;3;2" dur="2s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="8" cy="-8" r="2">
+        <animate attributeName="r" values="2;3;2" dur="2s" begin="0.5s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="0" cy="0" r="2.5">
+        <animate attributeName="r" values="2.5;3.5;2.5" dur="1.8s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="-8" cy="8" r="2">
+        <animate attributeName="r" values="2;3;2" dur="2s" begin="1s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="8" cy="8" r="2">
+        <animate attributeName="r" values="2;3;2" dur="2s" begin="1.5s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- Vector connections -->
+    <g stroke="#22d3ee" stroke-width="0.5" opacity="0.5">
+      <line x1="-8" y1="-8" x2="0" y2="0"/>
+      <line x1="8" y1="-8" x2="0" y2="0"/>
+      <line x1="-8" y1="8" x2="0" y2="0"/>
+      <line x1="8" y1="8" x2="0" y2="0"/>
+    </g>
+  </g>
+
+  <!-- Reasoning Layer (bottom left) -->
+  <g transform="translate(250, 320)" filter="url(#glow)">
+    <!-- Connection from activator -->
+    <path d="M 150,-140 Q 100,-70 0,0" fill="none" stroke="#f59e0b" stroke-width="2" opacity="0.6">
+      <animate attributeName="stroke-dasharray" values="0,1000;200,1000" dur="2s" repeatCount="indefinite"/>
+    </path>
+
+    <!-- Serverless indicator - scales up -->
+    <g opacity="0.8">
+      <rect x="-40" y="-30" width="80" height="60" rx="8" fill="url(#reasoningGrad)" opacity="0.2" stroke="url(#reasoningGrad)" stroke-width="2">
+        <animate attributeName="opacity" values="0;0.2;0.2;0" dur="4s" repeatCount="indefinite"/>
+      </rect>
+
+      <!-- Brain/thinking symbol -->
+      <g transform="translate(0, 0)">
+        <circle cx="0" cy="-5" r="12" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0">
+          <animate attributeName="opacity" values="0;0.8;0.8;0" dur="4s" repeatCount="indefinite"/>
+        </circle>
+        <path d="M -6,-8 Q -6,-14 0,-14 Q 6,-14 6,-8" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0">
+          <animate attributeName="opacity" values="0;0.8;0.8;0" dur="4s" repeatCount="indefinite"/>
+        </path>
+        <!-- Thought waves -->
+        <path d="M -8,5 Q 0,0 8,5" fill="none" stroke="#fcd34d" stroke-width="1.5" opacity="0">
+          <animate attributeName="opacity" values="0;0.6;0.6;0" dur="4s" repeatCount="indefinite"/>
+        </path>
+        <path d="M -6,10 Q 0,6 6,10" fill="none" stroke="#fcd34d" stroke-width="1.5" opacity="0">
+          <animate attributeName="opacity" values="0;0.5;0.5;0" dur="4s" begin="0.2s" repeatCount="indefinite"/>
+        </path>
+      </g>
+    </g>
+
+    <!-- Scale 0 indicator (dashed outline when inactive) -->
+    <rect x="-40" y="-30" width="80" height="60" rx="8" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,4" opacity="0.4">
+      <animate attributeName="opacity" values="0.4;0;0;0.4" dur="4s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- Execution Layer (bottom right) -->
+  <g transform="translate(550, 320)" filter="url(#glow)">
+    <!-- Connection from activator -->
+    <path d="M -150,-140 Q -100,-70 0,0" fill="none" stroke="#10b981" stroke-width="2" opacity="0.6">
+      <animate attributeName="stroke-dasharray" values="0,1000;200,1000" dur="2s" begin="0.5s" repeatCount="indefinite"/>
+    </path>
+
+    <!-- Serverless indicator - scales up -->
+    <g opacity="0.8">
+      <rect x="-40" y="-30" width="80" height="60" rx="8" fill="url(#executionGrad)" opacity="0.2" stroke="url(#executionGrad)" stroke-width="2">
+        <animate attributeName="opacity" values="0;0;0.2;0.2;0" dur="5s" repeatCount="indefinite"/>
+      </rect>
+
+      <!-- Gear/execution symbol -->
+      <g transform="translate(0, 0)" opacity="0">
+        <animate attributeName="opacity" values="0;0;0.8;0.8;0" dur="5s" repeatCount="indefinite"/>
+        <circle cx="0" cy="0" r="10" fill="none" stroke="#34d399" stroke-width="2"/>
+        <circle cx="0" cy="0" r="4" fill="#34d399"/>
+        <!-- Gear teeth -->
+        <g stroke="#34d399" stroke-width="3">
+          <line x1="0" y1="-13" x2="0" y2="-17">
+            <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="3s" repeatCount="indefinite"/>
+          </line>
+          <line x1="12" y1="0" x2="16" y2="0">
+            <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="3s" repeatCount="indefinite"/>
+          </line>
+          <line x1="0" y1="13" x2="0" y2="17">
+            <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="3s" repeatCount="indefinite"/>
+          </line>
+          <line x1="-12" y1="0" x2="-16" y2="0">
+            <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="3s" repeatCount="indefinite"/>
+          </line>
+        </g>
+      </g>
+    </g>
+
+    <!-- Scale 0 indicator -->
+    <rect x="-40" y="-30" width="80" height="60" rx="8" fill="none" stroke="#10b981" stroke-width="1" stroke-dasharray="4,4" opacity="0.4">
+      <animate attributeName="opacity" values="0.4;0.4;0;0;0.4" dur="5s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- Telemetry (bottom center) -->
+  <g transform="translate(400, 420)" filter="url(#glow)">
+    <!-- Connection from layers -->
+    <path d="M 0,-50 L 0,-20" fill="none" stroke="#ec4899" stroke-width="2" stroke-dasharray="3,3">
+      <animate attributeName="stroke-dashoffset" values="0;-12" dur="0.8s" repeatCount="indefinite"/>
+    </path>
+
+    <g transform="translate(-25, -15)">
+      <use href="#hexagon" stroke="url(#telemetryGrad)" transform="scale(0.7)"/>
+      <polygon points="30,0 60,17 60,52 30,69 0,52 0,17" fill="url(#telemetryGrad)" opacity="0.2" transform="scale(0.7)"/>
+    </g>
+
+    <!-- Pulse/metrics visualization -->
+    <g transform="translate(0, 10)">
+      <path d="M -15,0 L -8,-8 L 0,4 L 8,-12 L 15,0" fill="none" stroke="#f472b6" stroke-width="2">
+        <animate attributeName="stroke-dasharray" values="0,100;50,100" dur="1.5s" repeatCount="indefinite"/>
+      </path>
+    </g>
+  </g>
+
+  <!-- K3s Nodes (right side cluster visualization) -->
+  <g transform="translate(680, 250)">
+    <!-- Node cluster -->
+    <g filter="url(#glow)">
+      <!-- Master nodes -->
+      <circle cx="-30" cy="-40" r="12" fill="#1e293b" stroke="#6366f1" stroke-width="2">
+        <animate attributeName="stroke-opacity" values="0.5;1;0.5" dur="3s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="0" cy="-55" r="12" fill="#1e293b" stroke="#6366f1" stroke-width="2">
+        <animate attributeName="stroke-opacity" values="0.5;1;0.5" dur="3s" begin="0.5s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="30" cy="-40" r="12" fill="#1e293b" stroke="#6366f1" stroke-width="2">
+        <animate attributeName="stroke-opacity" values="0.5;1;0.5" dur="3s" begin="1s" repeatCount="indefinite"/>
+      </circle>
+
+      <!-- Worker nodes -->
+      <circle cx="-40" cy="10" r="10" fill="#1e293b" stroke="#10b981" stroke-width="2">
+        <animate attributeName="stroke-opacity" values="0.4;0.8;0.4" dur="4s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="-10" cy="20" r="10" fill="#1e293b" stroke="#10b981" stroke-width="2">
+        <animate attributeName="stroke-opacity" values="0.4;0.8;0.4" dur="4s" begin="0.7s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="20" cy="15" r="10" fill="#1e293b" stroke="#10b981" stroke-width="2">
+        <animate attributeName="stroke-opacity" values="0.4;0.8;0.4" dur="4s" begin="1.4s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="45" cy="5" r="10" fill="#1e293b" stroke="#10b981" stroke-width="2">
+        <animate attributeName="stroke-opacity" values="0.4;0.8;0.4" dur="4s" begin="2.1s" repeatCount="indefinite"/>
+      </circle>
+
+      <!-- Connections between nodes -->
+      <g stroke="#475569" stroke-width="1" opacity="0.4">
+        <line x1="-30" y1="-40" x2="0" y2="-55"/>
+        <line x1="0" y1="-55" x2="30" y2="-40"/>
+        <line x1="-30" y1="-40" x2="30" y2="-40"/>
+        <line x1="-30" y1="-40" x2="-40" y2="10"/>
+        <line x1="0" y1="-55" x2="-10" y2="20"/>
+        <line x1="30" y1="-40" x2="20" y2="15"/>
+        <line x1="30" y1="-40" x2="45" y2="5"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Data flow particles -->
+  <g>
+    <!-- Query particle flowing down -->
+    <circle r="4" fill="#a5b4fc">
+      <animateMotion dur="3s" repeatCount="indefinite" path="M 400,50 L 400,90"/>
+      <animate attributeName="opacity" values="0;1;1;0" dur="3s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- Learning particle to Qdrant -->
+    <circle r="3" fill="#22d3ee">
+      <animateMotion dur="2s" repeatCount="indefinite" begin="1s" path="M 360,130 L 220,130"/>
+      <animate attributeName="opacity" values="0;0.8;0.8;0" dur="2s" begin="1s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- Response particle flowing to execution -->
+    <circle r="3" fill="#34d399">
+      <animateMotion dur="2.5s" repeatCount="indefinite" begin="0.5s" path="M 430,160 Q 500,250 550,290"/>
+      <animate attributeName="opacity" values="0;0.8;0.8;0" dur="2.5s" begin="0.5s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- KEDA scaling arrows -->
+  <g transform="translate(310, 380)" opacity="0.7">
+    <path d="M 0,0 L 0,-20" stroke="#f59e0b" stroke-width="2" fill="none">
+      <animate attributeName="opacity" values="0;1;1;0" dur="4s" repeatCount="indefinite"/>
+    </path>
+    <polygon points="0,-25 -5,-15 5,-15" fill="#f59e0b">
+      <animate attributeName="opacity" values="0;1;1;0" dur="4s" repeatCount="indefinite"/>
+    </polygon>
+  </g>
+
+  <g transform="translate(490, 380)" opacity="0.7">
+    <path d="M 0,0 L 0,-20" stroke="#10b981" stroke-width="2" fill="none">
+      <animate attributeName="opacity" values="0;0;1;1;0" dur="5s" repeatCount="indefinite"/>
+    </path>
+    <polygon points="0,-25 -5,-15 5,-15" fill="#10b981">
+      <animate attributeName="opacity" values="0;0;1;1;0" dur="5s" repeatCount="indefinite"/>
+    </polygon>
+  </g>
+
+  <!-- Ambient connection lines -->
+  <g stroke="#4f46e5" stroke-width="1" opacity="0.15">
+    <line x1="400" y1="180" x2="400" y2="350"/>
+    <line x1="350" y1="160" x2="270" y2="290"/>
+    <line x1="450" y1="160" x2="530" y2="290"/>
+    <line x1="400" y1="130" x2="620" y2="200"/>
+  </g>
+</svg>
