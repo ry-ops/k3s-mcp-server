@@ -24,6 +24,7 @@ import json
 import yaml
 from typing import Any, Optional, Dict, List
 from pathlib import Path
+import re
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -38,6 +39,9 @@ import mcp.server.stdio
 KUBECONFIG = os.getenv("KUBECONFIG", str(Path.home() / ".kube" / "k3s-cortex-config.yaml"))
 DEFAULT_NAMESPACE = os.getenv("K3S_DEFAULT_NAMESPACE", "default")
 DEBUG = os.getenv("K3S_DEBUG", "false").lower() == "true"
+
+# Anchored regex for Kubernetes role label parsing
+_ROLE_LABEL_RE = re.compile(r'^node-role\.kubernetes\.io/(.+)$')
 
 
 class K3sClient:
@@ -160,7 +164,7 @@ class K3sClient:
         return {
             "name": node.metadata.name,
             "status": "Ready" if conditions.get("Ready") == "True" else "NotReady",
-            "roles": [label.split("/")[1] for label in (node.metadata.labels or {}) if label.startswith("node-role.kubernetes.io/")],
+            "roles": [m.group(1) for label in (node.metadata.labels or {}) for m in [_ROLE_LABEL_RE.match(label)] if m],
             "version": node.status.node_info.kubelet_version,
             "os": f"{node.status.node_info.os_image} ({node.status.node_info.architecture})",
             "kernel": node.status.node_info.kernel_version,
