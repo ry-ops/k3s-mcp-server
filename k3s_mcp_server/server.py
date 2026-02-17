@@ -22,6 +22,7 @@ import os
 import sys
 import json
 import asyncio
+import re
 import yaml
 from typing import Any, Optional, Dict, List
 from pathlib import Path
@@ -41,6 +42,9 @@ KUBECONFIG_PATH = os.getenv(
 )
 DEFAULT_NAMESPACE = os.getenv("K3S_DEFAULT_NAMESPACE", "default")
 DEBUG = os.getenv("K3S_DEBUG", "false").lower() == "true"
+
+# Anchored regex for Kubernetes role label parsing
+_ROLE_LABEL_RE = re.compile(r'^node-role\.kubernetes\.io/(.+)$')
 
 # Validate kubeconfig exists
 if not Path(KUBECONFIG_PATH).exists():
@@ -422,9 +426,10 @@ class K3sClient:
                     "name": node.metadata.name,
                     "status": "Ready" if conditions.get("Ready") == "True" else "NotReady",
                     "roles": [
-                        label.split("/")[1]
-                        for label in node.metadata.labels
-                        if label.startswith("node-role.kubernetes.io/")
+                        m.group(1)
+                        for label in (node.metadata.labels or {})
+                        for m in [_ROLE_LABEL_RE.match(label)]
+                        if m
                     ],
                     "version": node.status.node_info.kubelet_version,
                     "os": node.status.node_info.os_image,
