@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.svg" alt="k3s-mcp-server: kubectl operations for Claude on K3s clusters" width="100%"></p>
+
 # K3s MCP Server
 
 <p align="center">
@@ -491,3 +493,8 @@ MIT
 ---
 
 **Part of the Cortex Platform** - AI-native infrastructure orchestration on K3s
+
+<!-- org-footer -->
+---
+
+<p align="center"><sub>Part of <a href="https://github.com/ry-ops">ry-ops</a> · building the pipes between infrastructure, automation, and observability · built by <a href="https://github.com/ry-ops">ry-ops</a></sub></p>
