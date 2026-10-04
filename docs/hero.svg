@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="960" height="420" role="img" aria-labelledby="t d">
+  <title id="t">K3s MCP Server: run your cluster from a conversation</title>
+  <desc id="d">You ask to scale the api deployment to five replicas and show its logs. The K3s MCP server calls scale_deployment, get_pods and get_logs through the Kubernetes API; three new api pods appear across the cluster's nodes and log lines stream in. All names are examples.</desc>
+  <defs><linearGradient id="title" x1="0" x2="1"><stop offset="0" stop-color="#ffc61c"/><stop offset=".6" stop-color="#ff8a1f"/><stop offset="1" stop-color="#3ec7ff"/></linearGradient></defs>
+  <style>
+    text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #e6ebf5; }
+    .muted { fill: #8b96ad; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    @keyframes ask { 0%,1.67% { opacity: 0; transform: translateY(8px); } 4.58%,95.00% { opacity: 1; transform: translateY(0); } 97.50%,100% { opacity: 0; } } .ask { animation: ask 12.0s infinite; }
+    @keyframes c1 { 0%,10.00% { opacity: 0; } 12.92%,95.00% { opacity: 1; } 97.50%,100% { opacity: 0; } } .c1 { animation: c1 12.0s infinite; }
+    @keyframes c1ok { 0%,25.00% { opacity: 0; } 27.92%,95.00% { opacity: 1; } 97.50%,100% { opacity: 0; } } .c1ok { animation: c1ok 12.0s infinite; }
+    @keyframes c2 { 0%,28.33% { opacity: 0; } 31.25%,95.00% { opacity: 1; } 97.50%,100% { opacity: 0; } } .c2 { animation: c2 12.0s infinite; }
+    @keyframes c2ok { 0%,38.33% { opacity: 0; } 41.25%,95.00% { opacity: 1; } 97.50%,100% { opacity: 0; } } .c2ok { animation: c2ok 12.0s infinite; }
+    @keyframes c3 { 0%,41.67% { opacity: 0; } 44.58%,95.00% { opacity: 1; } 97.50%,100% { opacity: 0; } } .c3 { animation: c3 12.0s infinite; }
+    @keyframes c3ok { 0%,51.67% { opacity: 0; } 54.58%,95.00% { opacity: 1; } 97.50%,100% { opacity: 0; } } .c3ok { animation: c3ok 12.0s infinite; }
+    @keyframes ans { 0%,80.00% { opacity: 0; transform: translateY(6px); } 82.92%,95.00% { opacity: 1; transform: translateY(0); } 97.50%,100% { opacity: 0; } } .ans { animation: ans 12.0s infinite; }
+    @keyframes rep2 { 0%,0.00% { opacity: 0; } 2.92%,24.17% { opacity: 1; } 26.67%,100% { opacity: 0; } } .rep2 { animation: rep2 12.0s infinite; }
+    @keyframes rep5 { 0%,26.67% { opacity: 0; } 29.58%,95.00% { opacity: 1; } 97.50%,100% { opacity: 0; } } .rep5 { animation: rep5 12.0s infinite; }
+    @keyframes np0 { 0%,20.00% { opacity: 0; transform: scale(.2); } 22.50%,96.67% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } } .np0 { animation: np0 12.0s infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes np1 { 0%,23.33% { opacity: 0; transform: scale(.2); } 25.83%,96.67% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } } .np1 { animation: np1 12.0s infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes np2 { 0%,26.67% { opacity: 0; transform: scale(.2); } 29.17%,96.67% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } } .np2 { animation: np2 12.0s infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes lg0 { 0%,53.33% { opacity: 0; transform: translateX(-6px); } 56.25%,95.00% { opacity: 1; transform: translateX(0); } 97.50%,100% { opacity: 0; } } .lg0 { animation: lg0 12.0s infinite; }
+    @keyframes lg1 { 0%,57.50% { opacity: 0; transform: translateX(-6px); } 60.42%,95.00% { opacity: 1; transform: translateX(0); } 97.50%,100% { opacity: 0; } } .lg1 { animation: lg1 12.0s infinite; }
+    @keyframes lg2 { 0%,61.67% { opacity: 0; transform: translateX(-6px); } 64.58%,95.00% { opacity: 1; transform: translateX(0); } 97.50%,100% { opacity: 0; } } .lg2 { animation: lg2 12.0s infinite; }
+    @keyframes lg3 { 0%,65.83% { opacity: 0; transform: translateX(-6px); } 68.75%,95.00% { opacity: 1; transform: translateX(0); } 97.50%,100% { opacity: 0; } } .lg3 { animation: lg3 12.0s infinite; }
+    @keyframes lg4 { 0%,70.00% { opacity: 0; transform: translateX(-6px); } 72.92%,95.00% { opacity: 1; transform: translateX(0); } 97.50%,100% { opacity: 0; } } .lg4 { animation: lg4 12.0s infinite; }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } .rep2 { opacity: 0; } }
+  </style>
+  <rect width="960" height="420" rx="20" fill="#0f1420"/>
+  <text x="40" y="66" font-size="44" font-weight="800" style="fill:url(#title)">K3s MCP Server</text>
+  <text x="42" y="98" font-size="17" class="muted">Run Kubernetes from a conversation.</text>
+
+  <rect x="30" y="118" width="364" height="276" rx="16" fill="#161d2b" stroke="#2c3750"/>
+  <g class="ask"><rect x="62" y="134" width="316" height="34" rx="12" fill="#2a3550"/><text x="76" y="156" font-size="14">Scale api to 5 and show me its logs</text></g>
+  <g class="c1"><rect x="46" y="184" width="226" height="26" rx="8" fill="#1d2536" stroke="#ffc61c"/><text x="58" y="202" font-size="12.5" class="mono" style="fill:#ffe08a">scale_deployment <tspan class="muted">api → 5</tspan></text></g>
+  <g class="c1ok"><text x="280" y="202" font-size="14" style="fill:#3ddc84">✓</text></g>
+  <g class="c2"><rect x="46" y="216" width="226" height="26" rx="8" fill="#1d2536" stroke="#ffc61c"/><text x="58" y="234" font-size="12.5" class="mono" style="fill:#ffe08a">get_pods <tspan class="muted">app=api</tspan></text></g>
+  <g class="c2ok"><text x="280" y="234" font-size="14" style="fill:#3ddc84">✓</text></g>
+  <g class="c3"><rect x="46" y="248" width="226" height="26" rx="8" fill="#1d2536" stroke="#ffc61c"/><text x="58" y="266" font-size="12.5" class="mono" style="fill:#ffe08a">get_logs <tspan class="muted">tail=50</tspan></text></g>
+  <g class="c3ok"><text x="280" y="266" font-size="14" style="fill:#3ddc84">✓</text></g>
+  <g class="ans"><rect x="46" y="290" width="332" height="88" rx="12" fill="#1d2536"/>
+    <text x="60" y="316" font-size="14"><tspan font-weight="700">api</tspan> is at <tspan font-weight="700" style="fill:#ffc61c">5/5 ready</tspan> across 3 nodes.</text>
+    <text x="60" y="340" font-size="12.5" class="muted">Logs look healthy: 200s and 201s,</text>
+    <text x="60" y="358" font-size="12.5" class="muted">no errors in the last 50 lines.</text></g>
+
+  <text x="420" y="112" font-size="11" font-weight="700" class="muted" letter-spacing=".1em">K3S CLUSTER</text>
+  <g class="rep2"><text x="670" y="112" text-anchor="end" font-size="11" font-weight="700" class="mono muted">api 2/2</text></g>
+  <g class="rep5"><text x="670" y="112" text-anchor="end" font-size="11" font-weight="700" class="mono" style="fill:#ffc61c">api 5/5</text></g>
+  <rect x="420" y="120" width="250" height="74" rx="12" fill="#161d2b" stroke="#2c3750"/><text x="436" y="140" font-size="12" font-weight="700">server-1</text><text x="656" y="140" text-anchor="end" font-size="10" class="muted mono">Ready</text><rect x="436" y="150" width="68" height="28" rx="7" fill="#3a2f0b" stroke="#ffc61c" stroke-opacity=".7"/><text x="470" y="168" text-anchor="middle" font-size="11" class="mono" style="fill:#ffe08a">api</text><rect x="512" y="150" width="68" height="28" rx="7" fill="#10283a" stroke="#3ec7ff" stroke-opacity=".7"/><text x="546" y="168" text-anchor="middle" font-size="11" class="mono" style="fill:#a8e4ff">db</text><rect x="588" y="150" width="68" height="28" rx="7" fill="#10283a" stroke="#3ec7ff" stroke-opacity=".7"/><text x="622" y="168" text-anchor="middle" font-size="11" class="mono" style="fill:#a8e4ff">web</text><rect x="420" y="206" width="250" height="74" rx="12" fill="#161d2b" stroke="#2c3750"/><text x="436" y="226" font-size="12" font-weight="700">agent-1</text><text x="656" y="226" text-anchor="end" font-size="10" class="muted mono">Ready</text><rect x="436" y="236" width="68" height="28" rx="7" fill="#3a2f0b" stroke="#ffc61c" stroke-opacity=".7"/><text x="470" y="254" text-anchor="middle" font-size="11" class="mono" style="fill:#ffe08a">api</text><rect x="512" y="236" width="68" height="28" rx="7" fill="#10283a" stroke="#3ec7ff" stroke-opacity=".7"/><text x="546" y="254" text-anchor="middle" font-size="11" class="mono" style="fill:#a8e4ff">web</text><g class="np0"><rect x="588" y="236" width="68" height="28" rx="7" fill="#3a2f0b" stroke="#ffc61c"/><text x="622" y="254" text-anchor="middle" font-size="11" class="mono" style="fill:#ffe08a">api</text></g><rect x="420" y="292" width="250" height="74" rx="12" fill="#161d2b" stroke="#2c3750"/><text x="436" y="312" font-size="12" font-weight="700">agent-2</text><text x="656" y="312" text-anchor="end" font-size="10" class="muted mono">Ready</text><rect x="436" y="322" width="68" height="28" rx="7" fill="#10283a" stroke="#3ec7ff" stroke-opacity=".7"/><text x="470" y="340" text-anchor="middle" font-size="11" class="mono" style="fill:#a8e4ff">cache</text><g class="np1"><rect x="512" y="322" width="68" height="28" rx="7" fill="#3a2f0b" stroke="#ffc61c"/><text x="546" y="340" text-anchor="middle" font-size="11" class="mono" style="fill:#ffe08a">api</text></g><g class="np2"><rect x="588" y="322" width="68" height="28" rx="7" fill="#3a2f0b" stroke="#ffc61c"/><text x="622" y="340" text-anchor="middle" font-size="11" class="mono" style="fill:#ffe08a">api</text></g>
+  <rect x="690" y="120" width="246" height="274" rx="12" fill="#0b0f18" stroke="#2c3750"/>
+  <text x="704" y="144" font-size="10" font-weight="700" class="muted" letter-spacing=".1em">LOGS · api-7d9f…</text>
+  <g class="lg0"><text x="704" y="180" font-size="11.5" class="mono" style="fill:#c9d2e3">GET /healthz 200 1ms</text></g><g class="lg1"><text x="704" y="202" font-size="11.5" class="mono" style="fill:#c9d2e3">GET /api/orders 200 14ms</text></g><g class="lg2"><text x="704" y="224" font-size="11.5" class="mono" style="fill:#c9d2e3">POST /api/orders 201 22ms</text></g><g class="lg3"><text x="704" y="246" font-size="11.5" class="mono" style="fill:#c9d2e3">GET /api/orders/42 200 9ms</text></g><g class="lg4"><text x="704" y="268" font-size="11.5" class="mono" style="fill:#9ff0c4">worker ready on :8080</text></g>
+</svg>

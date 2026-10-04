@@ -1,498 +1,153 @@
-<p align="center"><img src="docs/banner.svg" alt="k3s-mcp-server: kubectl operations for Claude on K3s clusters" width="100%"></p>
-
-# K3s MCP Server
-
 <p align="center">
-  <img src="assets/cortex-fabric.svg" alt="Cortex Platform - AI-Native K3s Infrastructure" width="700"/>
+  <img src="docs/hero.svg" width="100%" alt="You ask to scale api to 5 and show its logs; scale_deployment, get_pods and get_logs run, three new api pods appear across the K3s nodes and log lines stream in.">
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python"></a>
-  <a href="https://github.com/astral-sh/uv"><img src="https://img.shields.io/badge/uv-latest-green.svg" alt="uv"></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-1.0-purple.svg" alt="MCP"></a>
-  <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-Adopter-orange.svg" alt="K3s"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/tools-13-ffc61c" alt="13 tools">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3ec7ff" alt="Python 3.10+"></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-b58cff" alt="MCP"></a>
+  <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-and%20any%20Kubernetes-ff8a1f" alt="K3s"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b96ad" alt="MIT"></a>
 </p>
 
-A Model Context Protocol (MCP) server for managing Kubernetes (K3s) clusters. This server enables AI assistants like Claude to manage K3s clusters through natural language, and serves as the foundation for **Cortex Platform** - an AI-native infrastructure orchestration system.
+<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 13 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
 
-## Cortex Platform: AI-Native Infrastructure on K3s
-
-This project is part of the **Cortex Platform**, a production system that demonstrates advanced K3s usage patterns:
-
-- **7-Layer Serverless Fabric** with KEDA auto-scaling (0→1 pods on demand)
-- **AI-powered query routing** with multi-tier classification
-- **Self-healing infrastructure** through MCP-based automation
-- **Vector memory (Qdrant)** for learning from operational patterns
-- **Dynamic worker pools** managed by AI agents
-
-### Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CORTEX PLATFORM                                   │
-│                        AI-Native K3s Infrastructure                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                    K3s CLUSTER (7 nodes)                            │   │
-│   │                    Talos Linux + etcd HA                            │   │
-│   │                                                                     │   │
-│   │   ┌─────────────────────────────────────────────────────────────┐   │   │
-│   │   │              UNIFI LAYER FABRIC                             │   │   │
-│   │   │         Serverless AI Network Operations                    │   │   │
-│   │   │                                                             │   │   │
-│   │   │   USER QUERY                                                │   │   │
-│   │   │       │                                                     │   │   │
-│   │   │       ▼                                                     │   │   │
-│   │   │   ┌───────────────────┐    ┌─────────────────┐              │   │   │
-│   │   │   │ CORTEX ACTIVATOR  │───▶│  CORTEX QDRANT  │              │   │   │
-│   │   │   │   (Always On)     │    │  (Always On)    │              │   │   │
-│   │   │   │   Query Router    │    │  Vector Memory  │              │   │   │
-│   │   │   │   128MB, 2 pods   │    │  512MB, 5Gi PVC │              │   │   │
-│   │   │   └─────────┬─────────┘    └─────────────────┘              │   │   │
-│   │   │             │                                               │   │   │
-│   │   │             │ 4-Tier Routing Cascade                        │   │   │
-│   │   │             │ 2. Similarity Search (<50ms)                  │   │   │
-│   │   │             │ 3. Lightweight Classifier (~5s cold)          │   │   │
-│   │   │             │ 4. Full SLM Reasoning (~12s cold)             │   │   │
-│   │   │             ▼                                               │   │   │
-│   │   │   ┌─────────────────────────────────────────────────────┐   │   │   │
-│   │   │   │            REASONING LAYERS (Scale 0→1)             │   │   │   │
-│   │   │   │                                                     │   │   │   │
-│   │   │   │   ┌──────────────────┐  ┌──────────────────────┐    │   │   │   │
-│   │   │   │   │ reasoning-       │  │ reasoning-slm        │    │   │   │   │
-│   │   │   │   │ classifier       │  │                      │    │   │   │   │
-│   │   │   │   │ Qwen2 0.5B       │  │ Phi-3 3.8B           │    │   │   │   │
-│   │   │   │   │ ~5s cold start   │  │ ~12s cold start      │    │   │   │   │
-│   │   │   │   │ 400MB warm       │  │ 2.5GB warm           │    │   │   │   │
-│   │   │   │   └──────────────────┘  └──────────────────────┘    │   │   │   │
-│   │   │   └─────────────────────────────────────────────────────┘   │   │   │
-│   │   │             │                                               │   │   │
-│   │   │             ▼                                               │   │   │
-│   │   │   ┌─────────────────────────────────────────────────────┐   │   │   │
-│   │   │   │            EXECUTION LAYERS (Scale 0→1)             │   │   │   │
-│   │   │   │                                                     │   │   │   │
-│   │   │   │   ┌──────────────────┐  ┌──────────────────────┐    │   │   │   │
-│   │   │   │   │ execution-       │  │ execution-           │    │   │   │   │
-│   │   │   │   │ execution-       │  │ execution-           │    │   │   │   │
-│   │   │   │   │ execution-       │  │ execution-           │    │   │   │   │
-│   │   │   │   │ unifi-api        │  │ unifi-ssh            │    │   │   │   │
-│   │   │   │   │ unifi-api        │  │ unifi-ssh            │    │   │   │   │
-│   │   │   │   │ Primary          │  │ Failover             │    │   │   │   │
-│   │   │   │   │ ~3s cold start   │  │ ~3s cold start       │    │   │   │   │
-│   │   │   │   └──────────────────┘  └──────────────────────┘    │   │   │   │
-│   │   │   └─────────────────────────────────────────────────────┘   │   │   │
-│   │   │             │                                               │   │   │
-│   │   │             ▼                                               │   │   │
-│   │   │   ┌───────────────────┐                                     │   │   │
-│   │   │   │ CORTEX TELEMETRY  │                                     │   │   │
-│   │   │   │ Metrics + Learning│                                     │   │   │
-│   │   │   │ Scale 0→1         │                                     │   │   │
-│   │   │   └───────────────────┘                                     │   │   │  
-│   │   └─────────────────────────────────────────────────────────────┘   │   │
-│   │                                                                     │   │
-│   │   ┌─────────────────────────────────────────────────────────────┐   │   │
-│   │   │                    MCP SERVERS                              │   │   │
-│   │   │                                                             │   │   │
-│   │   │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │   │   │
-│   │   │   │ k3s-mcp      │  │ talos-mcp    │  │ proxmox-mcp  │      │   │   │
-│   │   │   │ (this repo)  │  │              │  │              │      │   │   │
-│   │   │   │ Cluster ops  │  │ Node mgmt    │  │ VM lifecycle │      │   │   │
-│   │   │   └──────────────┘  └──────────────┘  └──────────────┘      │   │   │
-│   │   └─────────────────────────────────────────────────────────────┘   │   │
-│   │                                                                     │   │
-│   │   ┌─────────────────────────────────────────────────────────────┐   │   │
-│   │   │              DYNAMIC WORKER POOLS                           │   │   │
-│   │   │         (Managed by AI Resource Manager)                    │   │   │
-│   │   │                                                             │   │   │
-│   │   │   Permanent: 3-10 nodes (always running)                    │   │   │
-│   │   │   Burst:     0-20 nodes (TTL-based cleanup)                 │   │   │
-│   │   │   Spot:      0-15 nodes (70% cost savings)                  │   │   │
-│   │   │   GPU:       0-5 nodes  (special hardware taints)           │   │   │
-│   │   └─────────────────────────────────────────────────────────────┘   │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│   Memory Profile:                                                           │
-│   • Idle:         640MB  (Activator + Qdrant only)                          │
-│   • Simple query: 1GB    (+ execution layer)                                │
-│   • Complex:      4GB    (+ SLM reasoning)                                  │
-│   • Savings:      85%+   vs always-on architecture                          │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### The 7 Layers
-
-| Layer | Component | Purpose | Memory | Cold Start | Scale |
-|-------|-----------|---------|--------|------------|-------|
-| 1 | **cortex-activator** | Query routing & orchestration | 128MB | Always on | 2 replicas |
-| 2 | **cortex-qdrant** | Vector memory & RAG | 512MB | Always on | 1 replica |
-| 3 | **reasoning-classifier** | Fast intent classification | 400MB | ~5s | 0→1 |
-| 4 | **reasoning-slm** | Full reasoning (Phi-3) | 2.5GB | ~12s | 0→1 |
-| 5 | **execution-unifi-api** | Primary API operations | 200MB | ~3s | 0→2 |
-| 6 | **execution-unifi-ssh** | Failover & diagnostics | 100MB | ~3s | 0→1 |
-| 7 | **cortex-telemetry** | Metrics & learning pipeline | 128MB | ~2s | 0→1 |
-
-### Cortex Activator: Intelligent Query Router
-
-The Cortex Activator is the brain of the system - a lightweight service that routes queries through a 4-tier cascade:
-
-```
-Query: "Block the client with MAC aa:bb:cc:dd:ee:ff"
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│ TIER 1: Keyword Pattern Match (<10ms)                       │
-│                                                             │
-│ Pattern: "(block|unblock).*client" → MATCH                  │
-│ Confidence: 95%                                             │
-│ Action: Route directly to execution-unifi-api               │
-└─────────────────────────────────────────────────────────────┘
-         │
-         │ (If no match, continue to Tier 2)
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│ TIER 2: Qdrant Similarity Search (<50ms)                    │
-│                                                             │
-│ Query embedding → Search past successful routes             │
-│ If similar query succeeded before → Reuse routing           │
-│ Learning: Skip expensive LLM classification                 │
-└─────────────────────────────────────────────────────────────┘
-         │
-         │ (If similarity < 92%, continue to Tier 3)
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│ TIER 3: Lightweight Classifier (~5s cold start)             │
-│                                                             │
-│ Model: Qwen2-0.5B (quantized)                               │
-│ Use: Ambiguous queries needing quick classification         │
-│ KEDA: Scales from 0→1 on demand                             │
-└─────────────────────────────────────────────────────────────┘
-         │
-         │ (If complex investigation needed, continue to Tier 4)
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│ TIER 4: Full SLM Reasoning (~12s cold start)                │
-│                                                             │
-│ Model: Phi-3-mini-4k-instruct (3.8B, quantized)             │
-│ Use: Multi-step reasoning, complex troubleshooting          │
-│ KEDA: Scales from 0→1 on demand                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### KEDA Serverless Scaling
-
-Layers scale from 0 to 1 based on Prometheus metrics:
-
-```yaml
-# reasoning-slm KEDA configuration
-keda:
-  minReplicaCount: 0      # Scale to zero when idle
-  maxReplicaCount: 1
-  cooldownPeriod: 300     # Scale down after 5 min idle
-  trigger:
-    type: prometheus
-    query: sum(cortex_activator_pending_requests{layer="reasoning-slm"})
-    threshold: "1"        # Wake if ANY pending request
-```
-
-**Activation flow:**
-1. Query arrives → Activator increments `pending_requests` gauge
-2. KEDA detects metric > threshold → Scales deployment 0→1
-3. Pod starts → Health probe passes → Pod ready
-4. Request processed → Response sent
-5. 5 minutes idle → Cooldown triggers → Scales back to 0
-
-### Adaptive Intelligence (Phase 4)
-
-Query complexity scoring (0-100) determines execution mode:
-
-| Complexity | Score | Mode | Resources |
-|------------|-------|------|-----------|
-| SIMPLE | 0-25 | Direct execution | Activator only |
-| MODERATE | 26-50 | Basic classification | + Classifier |
-| COMPLEX | 51-75 | Full reasoning | + SLM |
-| EXPERT | 76-100 | Escalation | Human review |
-
-**Auto-escalation triggers:**
-- Low confidence (<50%) → Escalate mode
-- Previous similar queries failed → Escalate
-- Timeout (>30s agent, >60s hybrid) → Escalate
+<p align="center">
+  <a href="#tools">Tools</a> ·
+  <a href="#safety">Safety</a> ·
+  <a href="#setup">Setup</a> ·
+  <a href="#troubleshooting">Troubleshooting</a>
+</p>
 
 ---
 
-## K3s MCP Server Features
+## ✨ What you can ask
 
-This MCP server provides the foundation for AI-driven cluster management:
+> *"What's running in the `shop` namespace?"*
+> *"Why is the api pod crash-looping? Show me its last 100 log lines."*
+> *"Scale `web` to 3 replicas."*
+> *"Restart the stuck worker pod."*
+> *"Run `env` inside the api container."*
+> *"Apply this manifest."*
+> *"Which nodes are Ready, and how much capacity do they have?"*
 
-### Pod Management
-- List pods across namespaces with label selectors
-- Get pod logs with tail and container selection
-- Execute commands in pods
-- Restart pods (delete and recreate)
+<a id="tools"></a>
 
-### Deployment Management
-- List and describe deployments
-- Scale deployments up or down
-- Get deployment status and replica counts
+## 🧰 Tools
 
-### Service Management
-- List services and endpoints
-- View service ports and selectors
-- Check service types (ClusterIP, NodePort, LoadBalancer)
+<p align="center">
+  <img src="docs/rbac.svg" width="100%" alt="Eight tools look and five change things. With a view role, get_pods is allowed and delete_resource gets 403 Forbidden; with an edit role on one namespace, both are allowed there.">
+</p>
 
-### Node Management
-- List all cluster nodes
-- Get node status and resources
-- View node capacity and allocatable resources
-- Check node conditions (Ready, MemoryPressure, etc.)
+| | Tool | What it does |
+|---|---|---|
+| 👀 | `get_pods` | List pods in a namespace or all of them, with label selectors |
+| 👀 | `get_deployments` · `get_deployment` | List deployments, or describe one |
+| 👀 | `get_services` | List services |
+| 👀 | `get_nodes` | Nodes with their resource information |
+| 👀 | `get_namespaces` | All namespaces |
+| 👀 | `get_logs` | A pod's logs; choose the container and how many lines to tail |
+| 👀 | `get_cluster_info` | Version, nodes and namespaces at a glance |
+| ✏️ | `scale_deployment` | Set a deployment's replica count |
+| ✏️ | `restart_pod` | Delete a pod so its controller recreates it |
+| ✏️ | `execute_command` | Run a command in a pod's container |
+| ✏️ | `apply_manifest` | Create or update a Pod, Deployment or Service from YAML |
+| ✏️ | `delete_resource` | Delete a Pod, Deployment or Service |
 
-### Resource Management
-- Apply YAML manifests
-- Delete resources (pods, deployments, services)
-- List namespaces
-- Get cluster information
+<a id="safety"></a>
 
-## Quick Start
+## 🔒 Safety
 
-```bash
-# 1. Install uv (if not already installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+There's **no read-only switch**. The server can do whatever the **kubeconfig** it uses is allowed to do, and five tools change things, including running commands inside containers. So:
 
-# 2. Clone this repository
-git clone https://github.com/ry-ops/k3s-mcp-server.git
-cd k3s-mcp-server
+- **Just watching?** Give it a kubeconfig for a service account bound to the built-in **`view`** ClusterRole. Writes then fail with `403 Forbidden` at the API server.
+- **Hands-on?** Bind **`edit`** with a RoleBinding in the namespaces you trust it with, rather than handing it cluster-admin.
+- **Keep your MCP client's tool approval on**, so you see each call before it runs.
 
-# 3. Run setup script
-chmod +x setup.sh
-./setup.sh
+<a id="setup"></a>
 
-# 4. Set environment variables
-export KUBECONFIG="$HOME/.kube/config"
+## 🚀 Setup
 
-# 5. Test the server
-uv run k3s-mcp-server
-
-# 6. Configure Claude Desktop and restart
-```
-
-See [QUICKSTART.md](QUICKSTART.md) for detailed instructions.
-
-## Installation
-
-### Prerequisites
-
-- Python 3.10 or higher
-- `uv` package manager
-- K3s cluster with kubeconfig access
-- Kubeconfig file
-
-### Setup
+You need **Python 3.10+** with [`uv`](https://github.com/astral-sh/uv), and a kubeconfig for your cluster. On a K3s server it's at `/etc/rancher/k3s/k3s.yaml`; change its `server:` address to one you can reach.
 
 ```bash
-# Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Clone this repository
-git clone https://github.com/ry-ops/k3s-mcp-server.git
-cd k3s-mcp-server
-
-# Run setup script (creates structure and installs dependencies)
-./setup.sh
-
-# Or manually:
-uv sync
+git clone https://github.com/ry-ops/k3s-mcp-server && cd k3s-mcp-server
+./setup.sh                                # or: uv sync
+export KUBECONFIG="$HOME/.kube/config"    # see the note below
+./test-connection.sh
 ```
 
-## Configuration
+> [!NOTE]
+> If `KUBECONFIG` isn't set, the server looks for **`~/.kube/k3s-cortex-config.yaml`**, not the usual `~/.kube/config`. Set `KUBECONFIG` to point at your file.
 
-### Environment Variables
+| Variable | Default | What it does |
+|---|---|---|
+| `KUBECONFIG` | `~/.kube/k3s-cortex-config.yaml` | The kubeconfig to use. Its context and RBAC decide what the server can reach. |
+| `K3S_DEFAULT_NAMESPACE` | `default` | Namespace used when a tool call doesn't name one |
+| `K3S_DEBUG` | `false` | Verbose logging to stderr |
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `KUBECONFIG` | Path to kubeconfig file | `~/.kube/config` |
-| `K3S_DEFAULT_NAMESPACE` | Default namespace | `default` |
-| `K3S_DEBUG` | Enable debug logging | `false` |
-
-### Claude Desktop Configuration
-
-**MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+**Connect Claude Desktop.** Add this to `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or `%APPDATA%/Claude/claude_desktop_config.json` on Windows:
 
 ```json
 {
   "mcpServers": {
     "k3s": {
       "command": "uv",
-      "args": [
-        "--directory",
-        "/absolute/path/to/k3s-mcp-server",
-        "run",
-        "k3s-mcp-server"
-      ],
-      "env": {
-        "KUBECONFIG": "/path/to/.kube/config"
-      }
+      "args": ["--directory", "/absolute/path/to/k3s-mcp-server", "run", "k3s-mcp-server"],
+      "env": { "KUBECONFIG": "/absolute/path/to/your/kubeconfig.yaml" }
     }
   }
 }
 ```
 
-## Available Tools
+Restart Claude Desktop completely. There's more in [QUICKSTART.md](QUICKSTART.md), [CLAUDE-DESKTOP-CONFIG.md](CLAUDE-DESKTOP-CONFIG.md) and [INSTALLATION-CHECKLIST.md](INSTALLATION-CHECKLIST.md).
 
-### Pod Tools
+<a id="troubleshooting"></a>
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `get_pods` | List pods in namespace or cluster-wide | `namespace`, `labels` |
-| `get_logs` | Get pod logs | `pod_name`, `namespace`, `container`, `tail_lines` |
-| `restart_pod` | Restart a pod by deleting it | `name`, `namespace` |
-| `execute_command` | Execute command in pod | `pod_name`, `namespace`, `command`, `container` |
+## 🩺 Troubleshooting
 
-### Deployment Tools
+<details>
+<summary><b>"Kubeconfig not found"</b></summary>
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `get_deployments` | List all deployments | `namespace` |
-| `get_deployment` | Get specific deployment details | `name`, `namespace` |
-| `scale_deployment` | Scale deployment replicas | `name`, `namespace`, `replicas` |
+Set `KUBECONFIG` to an absolute path. Without it, the server looks for `~/.kube/k3s-cortex-config.yaml`.
+</details>
 
-### Cluster Tools
+<details>
+<summary><b>Connection refused or timeouts</b></summary>
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `get_nodes` | List all nodes with resources | - |
-| `get_services` | List all services | `namespace` |
-| `get_cluster_info` | Get cluster version and summary | - |
-| `get_namespaces` | List all namespaces | - |
-| `apply_manifest` | Apply YAML manifest | `manifest_yaml`, `namespace` |
-| `delete_resource` | Delete a resource | `kind`, `name`, `namespace` |
+- The `server:` URL in your kubeconfig must be reachable from where the server runs.
+- K3s writes `https://127.0.0.1:6443` by default; change it to the server's address.
+</details>
 
-## Example Usage
+<details>
+<summary><b>403 Forbidden</b></summary>
 
-Once configured, ask Claude to interact with your K3s cluster:
+That's RBAC working. The kubeconfig's identity isn't allowed to do that. See [Safety](#safety).
+</details>
 
-```
-"List all pods in the cortex-system namespace"
+<details>
+<summary><b>Tools don't show up in Claude</b></summary>
 
-"What's the status of the cortex-activator deployment?"
+Use absolute paths, check the config is valid JSON, and quit Claude Desktop completely before reopening it. Set `K3S_DEBUG=true` and check Claude's logs.
+</details>
 
-"Scale reasoning-slm to 1 replica"
-
-"Show me logs from the cortex-qdrant pod"
-
-"Which nodes are in my cluster and what's their capacity?"
-
-"Apply this deployment manifest: [YAML content]"
-```
-
-## Project Structure
+## 🧱 Project layout
 
 ```
-k3s-mcp-server/
-├── src/
-│   └── k3s_mcp_server/
-│       ├── __init__.py       # Package initialization
-│       └── server.py         # Main server implementation
-├── docs/
-│   ├── ARCHITECTURE.md       # Detailed architecture docs
-│   └── CORTEX_INTEGRATION.md # Cortex Platform integration
-├── pyproject.toml            # Project configuration
-├── uv.lock                   # Locked dependencies
-├── setup.sh                  # Automated setup script
-├── README.md                 # This file
-└── QUICKSTART.md             # Quick setup guide
+src/k3s_mcp_server/server.py   the server that gets packaged and installed (13 tools)
+docs/                          ARCHITECTURE.md and the animations on this page
+setup.sh, test-connection.sh   setup and a connection check
 ```
 
-## K3s Features Used
+Dependencies: `mcp`, `kubernetes` (the official client) and `pyyaml`.
 
-This project demonstrates production usage of K3s features:
+## 🌐 Part of Cortex
 
-| Feature | Usage |
-|---------|-------|
-| **Namespaces** | Multi-tenant isolation (cortex-system, cortex-mcp, cortex-unifi) |
-| **Deployments** | All workloads with rolling updates |
-| **KEDA** | Serverless 0→1 scaling for reasoning/execution layers |
-| **Helm** | Package management for all components |
-| **RBAC** | Fine-grained service account permissions |
-| **PVCs** | Persistent storage for Qdrant vector database |
-| **ConfigMaps/Secrets** | Configuration management |
-| **Health Probes** | Liveness, readiness, startup probes |
-| **Resource Limits** | CPU/memory requests and limits |
-| **Pod Anti-Affinity** | HA distribution across nodes |
-| **ArgoCD** | GitOps continuous deployment |
-
-## Security Considerations
-
-- **Kubeconfig Security**: Keep your kubeconfig file secure (chmod 600)
-- **RBAC**: Ensure appropriate permissions for the kubeconfig user
-- **Network Access**: Secure network connectivity to K3s API server
-- **Audit**: K8s API server logs all actions for auditing
-
-## Troubleshooting
-
-### Connection Errors
-- Verify `KUBECONFIG` path is correct and file exists
-- Check network connectivity to K3s server
-- Test with: `kubectl --kubeconfig /path/to/config get nodes`
-
-### Authentication Errors
-- Verify kubeconfig contains valid credentials
-- Check if certificates are valid and not expired
-
-### Tools Not Showing in Claude
-- Verify absolute path in Claude config
-- Check that config file is valid JSON
-- Restart Claude Desktop completely
-
-### Debug Mode
-```bash
-export K3S_DEBUG=true
-uv run k3s-mcp-server
-```
-
-## Roadmap
-
-- [ ] ConfigMap and Secret management
-- [ ] PersistentVolume and PVC operations
-- [ ] Ingress management
-- [ ] Job and CronJob support
-- [ ] StatefulSet operations
-- [ ] HorizontalPodAutoscaler (HPA) configuration
-- [ ] Helm chart deployment support
-- [ ] KEDA ScaledObject management
-
-## Dependencies
-
-- **mcp** (>=1.0.0): Model Context Protocol SDK
-- **kubernetes** (>=29.0.0): Official Python client for Kubernetes
-- **pyyaml** (>=6.0): YAML parser for manifest handling
-
-## Contributing
-
-Contributions welcome! Areas for improvement:
-- Additional resource types
-- Better error handling
-- Performance optimizations
-- Documentation improvements
-- Test coverage
+This server is one of the infrastructure tools behind the Cortex platform. See [CORTEX-INTEGRATION.md](CORTEX-INTEGRATION.md) for how it fits in, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 ## License
 
-MIT
-
-## Related Projects
-
-- [Model Context Protocol](https://modelcontextprotocol.io/)
-- [K3s - Lightweight Kubernetes](https://k3s.io/)
-- [KEDA - Kubernetes Event-driven Autoscaling](https://keda.sh/)
-- [Qdrant - Vector Database](https://qdrant.tech/)
-- [uv - Python Package Manager](https://github.com/astral-sh/uv)
-
----
-
-**Part of the Cortex Platform** - AI-native infrastructure orchestration on K3s
+MIT. See [LICENSE](LICENSE).
 
 <!-- org-footer -->
 ---
