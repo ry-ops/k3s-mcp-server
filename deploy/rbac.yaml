@@ -1,0 +1,85 @@
+# A least-privilege identity for k3s-mcp-server.
+#
+# - Read access across the cluster: the built-in `view` ClusterRole, plus node
+#   reads, which `view` leaves out (get_nodes and get_cluster_info need them).
+#   `view` can't read Secrets.
+# - Write access (scale, restart, exec, apply, delete) only in the namespaces
+#   that get an `edit` RoleBinding. `edit` can read Secrets in those namespaces.
+#
+# Apply with an admin kubeconfig, then build the server's kubeconfig from the
+# token as shown in the README's Safety section:
+#
+#   kubectl apply -f deploy/rbac.yaml
+#
+# Revoke the server's access by deleting the k3s-mcp-token Secret.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k3s-mcp
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k3s-mcp
+  namespace: k3s-mcp
+---
+# Long-lived token for the service account.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: k3s-mcp-token
+  namespace: k3s-mcp
+  annotations:
+    kubernetes.io/service-account.name: k3s-mcp
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k3s-mcp-node-reader
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k3s-mcp-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: k3s-mcp
+    namespace: k3s-mcp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k3s-mcp-node-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k3s-mcp-node-reader
+subjects:
+  - kind: ServiceAccount
+    name: k3s-mcp
+    namespace: k3s-mcp
+---
+# Write access in one namespace. Change `namespace` to the one you want, copy
+# this block for each extra namespace, or delete it for read-only access.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k3s-mcp-edit
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: ServiceAccount
+    name: k3s-mcp
+    namespace: k3s-mcp

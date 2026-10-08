@@ -58,11 +58,40 @@
 
 ## 🔒 Safety
 
-There's **no read-only switch**. The server can do whatever the **kubeconfig** it uses is allowed to do, and five tools change things, including running commands inside containers. So:
+There's **no read-only switch**. The server can do whatever the **kubeconfig** it uses is allowed to do, and five tools change things, including running commands inside containers. So don't hand it cluster-admin. [`deploy/rbac.yaml`](deploy/rbac.yaml) sets up a service account that can:
 
-- **Just watching?** Give it a kubeconfig for a service account bound to the built-in **`view`** ClusterRole. Writes then fail with `403 Forbidden` at the API server.
-- **Hands-on?** Bind **`edit`** with a RoleBinding in the namespaces you trust it with, rather than handing it cluster-admin.
-- **Keep your MCP client's tool approval on**, so you see each call before it runs.
+- **Read** across the cluster (the built-in **`view`** role, plus nodes). It can't read Secrets.
+- **Write** only in the namespaces you give an **`edit`** RoleBinding. The file binds `default`; change it, copy the block for more namespaces, or delete it for read-only. Writes anywhere else fail with `403 Forbidden` at the API server.
+
+Apply it with your admin kubeconfig, then build a kubeconfig for the server from the service account's token:
+
+```bash
+kubectl apply -f deploy/rbac.yaml
+
+SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+TOKEN=$(kubectl -n k3s-mcp get secret k3s-mcp-token -o jsonpath='{.data.token}' | base64 --decode)
+
+umask 077
+cat > ~/.kube/k3s-mcp.yaml <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- name: k3s
+  cluster: {server: $SERVER, certificate-authority-data: $CA}
+users:
+- name: k3s-mcp
+  user: {token: $TOKEN}
+contexts:
+- name: k3s-mcp
+  context: {cluster: k3s, user: k3s-mcp, namespace: default}
+current-context: k3s-mcp
+EOF
+```
+
+Point `KUBECONFIG` at `~/.kube/k3s-mcp.yaml`. To revoke access, delete the token: `kubectl -n k3s-mcp delete secret k3s-mcp-token`.
+
+**Keep your MCP client's tool approval on**, so you see each call before it runs.
 
 <a id="setup"></a>
 
@@ -122,7 +151,7 @@ Set `KUBECONFIG` to an absolute path. Without it, the server looks for `~/.kube/
 <details>
 <summary><b>403 Forbidden</b></summary>
 
-That's RBAC working. The kubeconfig's identity isn't allowed to do that. See [Safety](#safety).
+That's RBAC working. The kubeconfig's identity isn't allowed to do that. To allow writes in another namespace, add an `edit` RoleBinding there. See [Safety](#safety).
 </details>
 
 <details>
@@ -137,6 +166,7 @@ Use absolute paths, check the config is valid JSON, and quit Claude Desktop comp
 src/k3s_mcp_server/server.py   the server that gets packaged and installed (13 tools)
 docs/                          ARCHITECTURE.md and the animations on this page
 setup.sh, test-connection.sh   setup and a connection check
+deploy/rbac.yaml               a least-privilege service account for the server
 ```
 
 Dependencies: `mcp`, `kubernetes` (the official client) and `pyyaml`.
