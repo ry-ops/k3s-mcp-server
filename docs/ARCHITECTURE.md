@@ -1,589 +1,113 @@
-# Cortex Platform Architecture
+# Architecture
 
-This document provides detailed technical architecture for the Cortex Platform's K3s-based infrastructure.
+k3s-mcp-server is one Python module, [`src/k3s_mcp_server/server.py`](../src/k3s_mcp_server/server.py). It turns MCP tool calls into Kubernetes API calls through the official Python client. It has no database, no cache and no state between calls. The kubeconfig decides which cluster it reaches and what it may do there.
 
-## System Overview
-
-Cortex Platform is an AI-native infrastructure orchestration system built on K3s. It demonstrates how to build self-managing, serverless AI workloads on lightweight Kubernetes.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CORTEX PLATFORM STACK                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │ APPLICATION LAYER                                                     │ │
-│  │                                                                       │ │
-│  │  UniFi Layer Fabric    │  Cortex Live TUI  │  Blog Writer  │  etc.   │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                     │                                       │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │ ORCHESTRATION LAYER                                                   │ │
-│  │                                                                       │ │
-│  │  MCP Servers: k3s-mcp │ talos-mcp │ proxmox-mcp │ unifi-mcp          │ │
-│  │  Coordination: Redis Streams │ Agent Registry │ Task Queue           │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                     │                                       │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │ PLATFORM LAYER                                                        │ │
-│  │                                                                       │ │
-│  │  K3s Cluster (7 nodes) │ KEDA │ ArgoCD │ Prometheus │ Qdrant         │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                     │                                       │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │ INFRASTRUCTURE LAYER                                                  │ │
-│  │                                                                       │ │
-│  │  Talos Linux │ Proxmox VE │ etcd HA │ Longhorn Storage               │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    C["MCP client<br/>Claude Code, Claude Desktop, …"]
+    subgraph P["k3s-mcp-server process (uv run)"]
+        direction TB
+        S["MCP Server<br/>list_tools / call_tool"]
+        R["Tool router<br/>namespace defaults, JSON output, errors"]
+        K["K3sClient<br/>CoreV1 · AppsV1 · Version APIs"]
+        S --> R --> K
+    end
+    A["Kubernetes API server<br/>:6443"]
+    C <-->|"stdio (JSON-RPC)"| S
+    K -->|"HTTPS, kubeconfig credentials"| A
+    A -.->|"RBAC allows or returns 403"| K
 ```
 
-## K3s Cluster Architecture
+## Components
 
-### Node Topology
+| Piece | What it does |
+|---|---|
+| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 13 tool definitions with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
+| **Tool router** | One `call_tool` function: fills in the default namespace, calls the matching `K3sClient` method, and formats the result. |
+| **`K3sClient`** | Loads the kubeconfig once and holds the API clients. The tools use `CoreV1Api` and `AppsV1Api`; batch and networking clients are created but unused. Each method is a thin wrapper over one or two API calls that trims the response down to the fields worth reading. |
+| **Kubernetes API** | Does all the real work, including authentication and authorization. The server never checks permissions itself. |
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           K3s CLUSTER                                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   CONTROL PLANE (3 nodes, HA)                                               │
-│   ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐              │
-│   │ k3s-master01    │ │ k3s-master02    │ │ k3s-master03    │              │
-│   │                 │ │                 │ │                 │              │
-│   │ • etcd member   │ │ • etcd member   │ │ • etcd member   │              │
-│   │ • API server    │ │ • API server    │ │ • API server    │              │
-│   │ • Controller    │ │ • Controller    │ │ • Controller    │              │
-│   │ • Scheduler     │ │ • Scheduler     │ │ • Scheduler     │              │
-│   └─────────────────┘ └─────────────────┘ └─────────────────┘              │
-│                                                                             │
-│   WORKER NODES (4+ nodes)                                                   │
-│   ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────┐ │
-│   │ k3s-worker01    │ │ k3s-worker02    │ │ k3s-worker03    │ │ worker04│ │
-│   │                 │ │                 │ │                 │ │         │ │
-│   │ • kubelet       │ │ • kubelet       │ │ • kubelet       │ │ • ...   │ │
-│   │ • containerd    │ │ • containerd    │ │ • containerd    │ │         │ │
-│   │ • kube-proxy    │ │ • kube-proxy    │ │ • kube-proxy    │ │         │ │
-│   └─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────┘ │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+## Startup
 
-### Namespace Organization
+1. The client runs `uv --directory <repo> run k3s-mcp-server`. That console script calls `run()`, which runs the async `main()`.
+2. Importing the module creates the single `K3sClient`, which loads `$KUBECONFIG` (default `~/.kube/k3s-cortex-config.yaml`). A missing or unreadable file prints an error to stderr and **exits**. Nothing is reported over MCP, so check the client's log.
+3. `main()` opens the stdio transport and serves requests. Everything the server prints goes to stderr, because stdout carries the protocol.
 
-| Namespace | Purpose | Key Workloads |
-|-----------|---------|---------------|
-| `cortex-system` | Core infrastructure | cortex-live, resource-manager, health-monitor |
-| `cortex-mcp` | MCP server deployments | kubernetes-mcp, talos-mcp, proxmox-mcp |
-| `cortex-unifi` | UniFi Layer Fabric | activator, qdrant, reasoning, execution layers |
-| `cortex-monitoring` | Observability | Prometheus, kube-state-metrics |
-| `keda` | KEDA controller | keda-operator, keda-metrics-apiserver |
-| `argocd` | GitOps | argocd-server, application-controller |
+Loading the kubeconfig doesn't contact the cluster. An unreachable API server shows up as an error on the first tool call, not at startup.
 
-## UniFi Layer Fabric
+## A tool call
 
-The UniFi Layer Fabric is a serverless AI system for network operations. It demonstrates advanced K3s patterns including KEDA scaling, vector databases, and multi-tier routing.
-
-### Layer Architecture
-
-```
-                                 USER QUERY
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        LAYER 1: CORTEX ACTIVATOR                            │
-│                           (Always On, 2 replicas)                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                     4-TIER ROUTING CASCADE                          │   │
-│  │                                                                     │   │
-│  │  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────┐ │   │
-│  │  │   TIER 1    │   │   TIER 2    │   │   TIER 3    │   │ TIER 4  │ │   │
-│  │  │   Keyword   │──▶│  Similarity │──▶│ Classifier  │──▶│   SLM   │ │   │
-│  │  │   Match     │   │   Search    │   │  (Qwen2)    │   │ (Phi-3) │ │   │
-│  │  │   <10ms     │   │   <50ms     │   │   ~5s cold  │   │ ~12s    │ │   │
-│  │  └─────────────┘   └─────────────┘   └─────────────┘   └─────────┘ │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  Resources: 128MB memory, 200m CPU limit                                    │
-│  Health: /health (liveness), /ready (readiness)                             │
-│  Metrics: cortex_activator_queries_total, cortex_activator_cold_starts      │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     │
-              ┌──────────────────────┼──────────────────────┐
-              ▼                      ▼                      ▼
-┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-│  LAYER 2: QDRANT    │  │ LAYERS 3-4: REASON  │  │ LAYERS 5-6: EXECUTE │
-│  (Always On)        │  │ (Scale 0→1)         │  │ (Scale 0→1)         │
-├─────────────────────┤  ├─────────────────────┤  ├─────────────────────┤
-│                     │  │                     │  │                     │
-│ Vector Memory       │  │ reasoning-classifier│  │ execution-unifi-api │
-│ • routing_queries   │  │ • Qwen2-0.5B        │  │ • UniFi API calls   │
-│ • routing_outcomes  │  │ • 400MB warm        │  │ • 200MB warm        │
-│ • operations        │  │ • Intent classify   │  │ • Primary execution │
-│ • troubleshooting   │  │                     │  │                     │
-│                     │  │ reasoning-slm       │  │ execution-unifi-ssh │
-│ 512MB, 5Gi PVC      │  │ • Phi-3 3.8B        │  │ • SSH failover      │
-│ Embedding: 384 dim  │  │ • 2.5GB warm        │  │ • 100MB warm        │
-│                     │  │ • Tool calling      │  │ • Diagnostics       │
-└─────────────────────┘  └─────────────────────┘  └─────────────────────┘
-                                     │
-                                     ▼
-                      ┌─────────────────────────┐
-                      │  LAYER 7: TELEMETRY     │
-                      │  (Scale 0→1)            │
-                      ├─────────────────────────┤
-                      │                         │
-                      │ • Prometheus metrics    │
-                      │ • Audit logging         │
-                      │ • Learning pipeline     │
-                      │ • Training data export  │
-                      │                         │
-                      │ 128MB warm              │
-                      └─────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant C as MCP client
+    participant R as call_tool
+    participant K as K3sClient
+    participant A as API server
+    C->>R: tools/call scale_deployment {name: "web", replicas: 3}
+    R->>R: namespace missing → K3S_DEFAULT_NAMESPACE
+    R->>K: scale_deployment("web", "demo", 3)
+    K->>A: PATCH apps/v1 …/deployments/web/scale
+    A-->>K: 200, or 403 / 404
+    K-->>R: dict, or raises
+    R-->>C: TextContent: JSON, or "Error executing scale_deployment: …"
 ```
 
-### KEDA Configuration
+### Namespaces
 
-Each serverless layer uses KEDA for scale-to-zero:
+- **List tools** (`get_pods`, `get_deployments`, `get_services`): no namespace means **all namespaces** (`list_*_for_all_namespaces`).
+- **Single-object tools**: no namespace means `K3S_DEFAULT_NAMESPACE` (default `default`).
+- **`apply_manifest`**: uses the `namespace` argument, then the manifest's own `metadata.namespace`, then `K3S_DEFAULT_NAMESPACE`.
 
-```yaml
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: reasoning-slm
-  namespace: cortex-unifi
-spec:
-  scaleTargetRef:
-    name: reasoning-slm
-  minReplicaCount: 0
-  maxReplicaCount: 1
-  cooldownPeriod: 300
-  triggers:
-    - type: prometheus
-      metadata:
-        serverAddress: http://prometheus.cortex-monitoring:9090
-        metricName: cortex_activator_pending_requests
-        query: sum(cortex_activator_pending_requests{layer="reasoning-slm"})
-        threshold: "1"
-```
+### Results and errors
 
-### Memory Profile
+- Structured results are returned as pretty-printed JSON in a single `TextContent`. Logs and command output come back as plain text.
+- Any exception, whether an API error, unsupported kind or bad YAML, is caught and returned as text: `Error executing <tool>: <message>`, with the HTTP status (for example `(403) Reason: Forbidden`). The call doesn't set the MCP `isError` flag, so clients see errors as ordinary text.
 
-| State | Memory Usage | Active Layers |
-|-------|--------------|---------------|
-| **Idle** | 640MB | Activator + Qdrant |
-| **Simple Query** | ~1GB | + Execution API |
-| **Classification** | ~1.4GB | + Classifier |
-| **Complex Query** | ~4GB | + SLM Reasoning |
-| **Full Stack** | ~4.5GB | All layers |
+## Tools and the API calls behind them
 
-**Savings: 85%+ vs always-on architecture**
+| Tool | Kubernetes API | RBAC it needs |
+|---|---|---|
+| `get_pods` | `list_namespaced_pod` / `list_pod_for_all_namespaces`, with an optional label selector | `list pods` |
+| `get_deployments` | `list_namespaced_deployment` / `list_deployment_for_all_namespaces` | `list deployments.apps` |
+| `get_deployment` | `read_namespaced_deployment` | `get deployments.apps` |
+| `get_services` | `list_namespaced_service` / `list_service_for_all_namespaces` | `list services` |
+| `get_nodes` | `list_node` | `list nodes` (cluster-scoped; the built-in `view` role doesn't include it) |
+| `get_namespaces` | `list_namespace` | `list namespaces` |
+| `get_logs` | `read_namespaced_pod_log` with `tail_lines` (default 100) | `get pods/log` |
+| `get_cluster_info` | `VersionApi.get_code` + `list_node` + `list_namespace` | `list nodes`, `list namespaces` |
+| `scale_deployment` | `patch_namespaced_deployment_scale` | `patch deployments.apps/scale` |
+| `restart_pod` | `delete_namespaced_pod`; the owning controller re-creates it | `delete pods` |
+| `execute_command` | `connect_get_namespaced_pod_exec` over a WebSocket stream, no TTY or stdin | `create pods/exec` |
+| `apply_manifest` | `create_namespaced_{pod,deployment,service}` | `create` on that kind |
+| `delete_resource` | `delete_namespaced_{pod,deployment,service}` | `delete` on that kind |
 
-## Cortex Activator Deep Dive
+[`deploy/rbac.yaml`](../deploy/rbac.yaml) grants all of the read rows cluster-wide (`view` plus a node-reader role) and the write rows only in namespaces bound to `edit`.
 
-### Query Processing Flow
+## Security boundary
 
-```python
-async def process_query(query: str, context: dict) -> Response:
-    """
-    Main query processing with 4-tier cascade
-    """
+The server holds no secrets of its own and adds no permission checks. **The kubeconfig's RBAC is the boundary.** Five tools change state, and `execute_command` runs arbitrary commands inside containers, so:
 
-    # Phase 4: Score query complexity (0-100)
-    complexity = score_complexity(query)
+- Give the server a scoped service account, not cluster-admin. See the README's [Safety](../README.md#safety) section.
+- Keep tool approval on in your MCP client, so a person sees each write before it runs.
+- The kubeconfig holds a bearer token. Keep it at mode `600`; deleting the `k3s-mcp-token` Secret revokes it.
 
-    # Tier 1: Keyword pattern matching (<10ms)
-    if pattern_match := match_keywords(query):
-        return await execute_direct(pattern_match.layer, query)
+## Known limits
 
-    # Tier 2: Similarity search in Qdrant (<50ms)
-    if similar := await qdrant_search(query, threshold=0.92):
-        if similar.success_rate >= 0.8:
-            return await execute_learned(similar.routing, query)
+These are properties of the current code, not of Kubernetes:
 
-    # Tier 3: Lightweight classifier (~5s cold)
-    if complexity < 50:
-        await wake_layer("reasoning-classifier")
-        classification = await classify(query)
-        return await execute_classified(classification, query)
+- **`apply_manifest` creates; it doesn't apply.** There's no server-side apply or patch, so an existing name returns `409 Conflict`. It takes one object per call: multi-document YAML (`---`) fails to parse.
+- **Three kinds.** `apply_manifest` and `delete_resource` handle Pod, Deployment and Service only.
+- **No events, metrics or log following.**
+- **Blocking calls.** The Kubernetes client is synchronous and is called directly from async handlers, so one slow API call holds up the next. That's fine for one client issuing one call at a time, which is how MCP clients use it.
+- **Errors aren't flagged.** Failures come back as normal text, not with `isError: true`.
 
-    # Tier 4: Full SLM reasoning (~12s cold)
-    await wake_layer("reasoning-slm")
-    reasoning = await reason(query, context)
-    return await execute_reasoned(reasoning, query)
-```
-
-### Routing Rules
-
-```yaml
-routing:
-  keywords:
-    # Client operations
-    - pattern: "(block|unblock).*client"
-      layer: execution-unifi-api
-      tool: block_client
-      confidence: 0.95
-
-    - pattern: "(list|show|get).*client"
-      layer: execution-unifi-api
-      tool: get_clients
-      confidence: 0.90
-
-    # Device operations
-    - pattern: "(restart|reboot).*device"
-      layer: execution-unifi-api
-      tool: restart_device
-      requiresConfirmation: true
-      confidence: 0.95
-
-    # Diagnostics (SSH layer)
-    - pattern: "(diagnose|troubleshoot|investigate)"
-      layer: reasoning-slm  # Needs reasoning first
-      confidence: 0.70
-
-    - pattern: "(show|get).*(log|logs)"
-      layer: execution-unifi-ssh
-      tool: get_logs
-      confidence: 0.85
-```
-
-### Complexity Scoring
-
-```python
-def score_complexity(query: str) -> int:
-    """
-    Score query complexity from 0-100
-
-    Factors:
-    - Keywords: investigate (+20), analyze (+18), troubleshoot (+22)
-    - Length: >500 chars (+15)
-    - Questions: multiple questions (+8 each)
-    - Entities: MACs, IPs, VLANs (+3 each)
-    - Context: large context (+10)
-    """
-    score = 0
-
-    # High complexity indicators
-    if "investigate" in query.lower(): score += 20
-    if "analyze" in query.lower(): score += 18
-    if "troubleshoot" in query.lower(): score += 22
-
-    # Low complexity indicators
-    if query.lower().startswith(("list", "show", "get")): score -= 5
-
-    # Length factor
-    if len(query) > 500: score += 15
-
-    # Question count
-    score += query.count("?") * 8
-
-    # Entity count (simplified)
-    score += len(re.findall(r'[0-9a-f]{2}:[0-9a-f]{2}:', query, re.I)) * 3
-
-    return min(100, max(0, score))
-```
-
-## Learning System
-
-### Qdrant Collections
-
-```yaml
-collections:
-  routing_queries:
-    description: Query embeddings with routing decisions
-    vector_size: 384  # all-MiniLM-L6-v2
-    distance: Cosine
-    indexes:
-      - route_type: keyword  # cache, keyword, similarity, classifier, slm
-      - tool: keyword
-      - execution_layer: keyword
-      - success: bool
-      - latency_ms: integer
-      - timestamp: datetime
-
-  routing_outcomes:
-    description: Links queries to execution results
-    vector_size: 384
-    indexes:
-      - query_id: keyword
-      - success: bool
-      - error_type: keyword
-      - user_feedback: keyword
-      - timestamp: datetime
-```
-
-### Learning Flow
+## Repository layout
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          LEARNING PIPELINE                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  1. QUERY ARRIVES                                                           │
-│     │                                                                       │
-│     ▼                                                                       │
-│  2. EMBED QUERY                                                             │
-│     │  Model: all-MiniLM-L6-v2 (384 dimensions)                            │
-│     │                                                                       │
-│     ▼                                                                       │
-│  3. SEARCH SIMILAR (Tier 2)                                                 │
-│     │  Threshold: 0.92 cosine similarity                                   │
-│     │  Min samples: 3 successful executions                                │
-│     │                                                                       │
-│     ├─── MATCH FOUND ──▶ Reuse routing (skip classification)               │
-│     │                                                                       │
-│     └─── NO MATCH ──▶ Continue to Tier 3/4                                 │
-│                                                                             │
-│  4. EXECUTE QUERY                                                           │
-│     │                                                                       │
-│     ▼                                                                       │
-│  5. STORE OUTCOME                                                           │
-│     │  • Query ID + embedding                                              │
-│     │  • Tool selected                                                      │
-│     │  • Layer used                                                         │
-│     │  • Success/failure                                                    │
-│     │  • Latency                                                            │
-│     │                                                                       │
-│     ▼                                                                       │
-│  6. UPDATE SUCCESS RATE                                                     │
-│     │  • Per-tool success rate                                             │
-│     │  • Per-routing success rate                                           │
-│     │  • Overall confidence adjustment                                      │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+src/k3s_mcp_server/server.py   the whole server: K3sClient, tool definitions, router, entry points
+src/k3s_mcp_server/__init__.py package metadata (__version__)
+deploy/rbac.yaml               least-privilege service account for the server
+scripts/setup.sh               checks uv, runs uv sync
+scripts/test-connection.sh     exercises K3sClient against your cluster
+docs/                          these guides and the README animations
 ```
-
-## Deployment with ArgoCD
-
-### ApplicationSet Structure
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
-metadata:
-  name: unifi-layer-fabric
-  namespace: argocd
-spec:
-  generators:
-    - list:
-        elements:
-          # Wave 0: Namespace
-          - name: cortex-unifi-namespace
-            wave: "0"
-
-          # Wave 1: Always-on storage
-          - name: cortex-qdrant
-            wave: "1"
-
-          # Wave 2: Always-on routing
-          - name: cortex-activator
-            wave: "2"
-
-          # Wave 3: Reasoning layers
-          - name: reasoning-classifier
-            wave: "3"
-          - name: reasoning-slm
-            wave: "3"
-
-          # Wave 4: Execution layers
-          - name: execution-unifi-api
-            wave: "4"
-          - name: execution-unifi-ssh
-            wave: "4"
-
-          # Wave 5: Telemetry
-          - name: cortex-telemetry
-            wave: "5"
-
-  template:
-    metadata:
-      name: '{{name}}'
-      annotations:
-        argocd.argoproj.io/sync-wave: '{{wave}}'
-    spec:
-      project: cortex
-      source:
-        repoURL: https://github.com/org/cortex-gitops
-        targetRevision: HEAD
-        path: 'charts/{{name}}'
-      destination:
-        server: https://kubernetes.default.svc
-        namespace: cortex-unifi
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=true
-```
-
-## Monitoring & Observability
-
-### Prometheus Metrics
-
-```yaml
-# Activator metrics
-- cortex_activator_queries_total{route_type, layer, status}
-- cortex_activator_cold_starts_total{layer}
-- cortex_activator_cold_start_seconds{layer}  # histogram
-- cortex_activator_pending_requests{layer}     # KEDA trigger
-- cortex_activator_layer_up{layer}             # 0 or 1
-
-# Learning metrics
-- cortex_activator_similarity_lookups_total{result}  # hit, miss, error
-- cortex_activator_similarity_latency_seconds        # histogram
-- cortex_activator_routing_stored_total{route_type}
-- cortex_activator_outcomes_stored_total{success}
-
-# Mode switching metrics
-- cortex_activator_mode_decisions_total{mode, complexity}
-- cortex_activator_complexity_score        # histogram 0-100
-- cortex_activator_escalations_total{reason}
-```
-
-### Alerting Rules
-
-```yaml
-groups:
-  - name: cortex-fabric
-    rules:
-      - alert: ActivatorDown
-        expr: up{job="cortex-activator"} == 0
-        for: 1m
-        labels:
-          severity: critical
-
-      - alert: HighColdStartLatency
-        expr: histogram_quantile(0.95, cortex_activator_cold_start_seconds) > 30
-        for: 5m
-        labels:
-          severity: warning
-
-      - alert: LowRoutingSuccessRate
-        expr: |
-          sum(rate(cortex_activator_queries_total{status="success"}[5m])) /
-          sum(rate(cortex_activator_queries_total[5m])) < 0.9
-        for: 10m
-        labels:
-          severity: warning
-```
-
-## Dynamic Worker Pool Management
-
-The Resource Manager AI agent manages dynamic worker pools:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      DYNAMIC WORKER POOLS                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  PERMANENT POOL (3-10 nodes)                                                │
-│  ├── Always running                                                         │
-│  ├── Core workloads                                                         │
-│  └── No TTL                                                                 │
-│                                                                             │
-│  BURST POOL (0-20 nodes)                                                    │
-│  ├── Scale up on demand                                                     │
-│  ├── TTL-based cleanup (default: 1 hour)                                    │
-│  └── Triggers: CPU ≥80%, Memory ≥85%, Pending pods                         │
-│                                                                             │
-│  SPOT POOL (0-15 nodes)                                                     │
-│  ├── 70% cost savings                                                       │
-│  ├── Preemptible workloads                                                  │
-│  └── Tolerations for spot-instance taint                                    │
-│                                                                             │
-│  GPU POOL (0-5 nodes)                                                       │
-│  ├── Special hardware                                                       │
-│  ├── nvidia.com/gpu taint                                                   │
-│  └── ML/AI workloads                                                        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-                           PROVISIONING FLOW
-
-   Scale Trigger        Proxmox MCP            Talos MCP            K3s
-        │                   │                      │                  │
-        │  Clone VM         │                      │                  │
-        ├──────────────────▶│                      │                  │
-        │                   │  Generate config     │                  │
-        │                   ├─────────────────────▶│                  │
-        │                   │                      │  Join cluster    │
-        │                   │                      ├─────────────────▶│
-        │                   │                      │                  │
-        │◀─────────────────────────────────────────────────────────────
-        │                    Node ready
-```
-
-## Security Model
-
-### RBAC Configuration
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: cortex-activator
-rules:
-  # Scale serverless layers
-  - apiGroups: ["apps"]
-    resources: ["deployments", "deployments/scale"]
-    verbs: ["get", "list", "watch", "patch"]
-
-  # KEDA integration
-  - apiGroups: ["keda.sh"]
-    resources: ["scaledobjects"]
-    verbs: ["get", "list", "watch", "patch"]
-
-  # Pod status for health checks
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-```
-
-### Network Policies
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: activator-egress
-  namespace: cortex-unifi
-spec:
-  podSelector:
-    matchLabels:
-      app: cortex-activator
-  policyTypes:
-    - Egress
-  egress:
-    # Allow to other fabric layers
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              name: cortex-unifi
-    # Allow to Prometheus
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              name: cortex-monitoring
-    # Allow to Redis (Cortex master)
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              name: cortex-system
-```
-
-## Conclusion
-
-The Cortex Platform demonstrates how to build sophisticated, self-managing AI infrastructure on K3s:
-
-1. **Serverless AI** - KEDA scales reasoning/execution layers 0→1
-2. **Intelligent Routing** - 4-tier cascade minimizes cold starts
-3. **Learning System** - Qdrant stores patterns for continuous improvement
-4. **Dynamic Scaling** - AI manages worker pool lifecycle
-5. **GitOps** - ArgoCD ensures declarative, version-controlled deployments
-
-This architecture achieves 85%+ memory savings compared to always-on approaches while maintaining sub-second response times for common queries.

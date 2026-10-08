@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/ry-ops/k3s-mcp-server/releases/latest"><img src="https://img.shields.io/github/v/release/ry-ops/k3s-mcp-server?color=3fd68b" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/tools-13-ffc61c" alt="13 tools">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3ec7ff" alt="Python 3.10+"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-b58cff" alt="MCP"></a>
@@ -16,6 +17,7 @@
   <a href="#tools">Tools</a> ·
   <a href="#safety">Safety</a> ·
   <a href="#setup">Setup</a> ·
+  <a href="#guides">Guides</a> ·
   <a href="#troubleshooting">Troubleshooting</a>
 </p>
 
@@ -24,12 +26,22 @@
 ## ✨ What you can ask
 
 > *"What's running in the `shop` namespace?"*
-> *"Why is the api pod crash-looping? Show me its last 100 log lines."*
+> *"Why is the api pod crash-looping? Show me its restarts and last 100 log lines."*
+> *"Which pods are labelled `app=web`, and which nodes are they on?"*
 > *"Scale `web` to 3 replicas."*
 > *"Restart the stuck worker pod."*
 > *"Run `env` inside the api container."*
-> *"Apply this manifest."*
+> *"Create this deployment."* (paste the YAML)
 > *"Which nodes are Ready, and how much capacity do they have?"*
+
+## 🌟 Why this one
+
+- **Reads and writes, 13 tools.** Pods, deployments, services, nodes, namespaces and logs to look; scale, restart, exec, create and delete to act.
+- **Least privilege, ready to apply.** [`deploy/rbac.yaml`](deploy/rbac.yaml) gives the server its own service account: it can read everywhere, write only in the namespaces you pick, and never read Secrets outside them. Delete one Secret to cut it off.
+- **Cluster-wide by default.** List tools search every namespace unless you name one, and label selectors narrow them down.
+- **Any client, any number of clusters.** Works with Claude Code, Claude Desktop or any stdio MCP client. Register it once per kubeconfig and say *"on k3s-prod, …"*.
+- **Checks itself first.** `scripts/test-connection.sh` runs the server's own client against your cluster before you connect a client.
+- **Small enough to read.** One Python module on the official Kubernetes client, with no database, no daemon and no state. [ARCHITECTURE.md](docs/ARCHITECTURE.md) maps every tool to its API call and the RBAC it needs.
 
 <a id="tools"></a>
 
@@ -41,17 +53,17 @@
 
 | | Tool | What it does |
 |---|---|---|
-| 👀 | `get_pods` | List pods in a namespace or all of them, with label selectors |
-| 👀 | `get_deployments` · `get_deployment` | List deployments, or describe one |
-| 👀 | `get_services` | List services |
-| 👀 | `get_nodes` | Nodes with their resource information |
+| 👀 | `get_pods` | Pods in one namespace or all of them, filtered by label, with status, node, IPs and restart counts |
+| 👀 | `get_deployments` · `get_deployment` | Deployments in one namespace or all of them, or the details of one |
+| 👀 | `get_services` | Services in one namespace or all of them |
+| 👀 | `get_nodes` | Nodes with roles, Ready and pressure conditions, versions, OS and capacity |
 | 👀 | `get_namespaces` | All namespaces |
 | 👀 | `get_logs` | A pod's logs; choose the container and how many lines to tail |
 | 👀 | `get_cluster_info` | Version, nodes and namespaces at a glance |
 | ✏️ | `scale_deployment` | Set a deployment's replica count |
 | ✏️ | `restart_pod` | Delete a pod so its controller recreates it |
 | ✏️ | `execute_command` | Run a command in a pod's container |
-| ✏️ | `apply_manifest` | Create or update a Pod, Deployment or Service from YAML |
+| ✏️ | `apply_manifest` | Create a Pod, Deployment or Service from YAML (create only; an existing name returns `409`) |
 | ✏️ | `delete_resource` | Delete a Pod, Deployment or Service |
 
 <a id="safety"></a>
@@ -97,25 +109,23 @@ Point `KUBECONFIG` at `~/.kube/k3s-mcp.yaml`. To revoke access, delete the token
 
 ## 🚀 Setup
 
-You need **Python 3.10+** with [`uv`](https://github.com/astral-sh/uv), and a kubeconfig for your cluster. On a K3s server it's at `/etc/rancher/k3s/k3s.yaml`; change its `server:` address to one you can reach.
+You need **Python 3.10+** with [`uv`](https://github.com/astral-sh/uv), and a cluster whose API server you can reach. [QUICKSTART.md](docs/QUICKSTART.md) walks through every step, including getting the kubeconfig off a K3s node.
 
 ```bash
 git clone https://github.com/ry-ops/k3s-mcp-server && cd k3s-mcp-server
-bash scripts/setup.sh                     # or: uv sync
-export KUBECONFIG="$HOME/.kube/config"    # see the note below
+bash scripts/setup.sh                            # or: uv sync
+export KUBECONFIG="$HOME/.kube/k3s-mcp.yaml"     # the scoped kubeconfig from Safety
 bash scripts/test-connection.sh
 ```
 
-> [!NOTE]
-> If `KUBECONFIG` isn't set, the server looks for **`~/.kube/k3s-cortex-config.yaml`**, not the usual `~/.kube/config`. Set `KUBECONFIG` to point at your file.
+**Connect Claude Code** in one command, available in every project:
 
-| Variable | Default | What it does |
-|---|---|---|
-| `KUBECONFIG` | `~/.kube/k3s-cortex-config.yaml` | The kubeconfig to use. Its context and RBAC decide what the server can reach. |
-| `K3S_DEFAULT_NAMESPACE` | `default` | Namespace used when a tool call doesn't name one |
-| `K3S_DEBUG` | `false` | Verbose logging to stderr |
+```bash
+claude mcp add k3s --scope user -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" \
+  -- uv --directory "$PWD" run k3s-mcp-server
+```
 
-**Connect Claude Desktop.** Add this to `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or `%APPDATA%/Claude/claude_desktop_config.json` on Windows:
+**Or Claude Desktop.** Add this to `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows, then quit and reopen the app:
 
 ```json
 {
@@ -123,13 +133,30 @@ bash scripts/test-connection.sh
     "k3s": {
       "command": "uv",
       "args": ["--directory", "/absolute/path/to/k3s-mcp-server", "run", "k3s-mcp-server"],
-      "env": { "KUBECONFIG": "/absolute/path/to/your/kubeconfig.yaml" }
+      "env": { "KUBECONFIG": "/absolute/path/to/k3s-mcp.yaml" }
     }
   }
 }
 ```
 
-Restart Claude Desktop completely. There's more in [QUICKSTART.md](docs/QUICKSTART.md), [CLAUDE-DESKTOP-CONFIG.md](docs/CLAUDE-DESKTOP-CONFIG.md) and [INSTALLATION-CHECKLIST.md](docs/INSTALLATION-CHECKLIST.md).
+[CLIENTS.md](docs/CLIENTS.md) covers other clients and running several clusters side by side.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `KUBECONFIG` | `~/.kube/k3s-cortex-config.yaml` | The kubeconfig to use; its current context and RBAC decide what the server can reach. **Set it.** The default is a leftover name, not the usual `~/.kube/config`. |
+| `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools act when a call doesn't name a namespace. List tools search all namespaces instead. |
+| `K3S_DEBUG` | `false` | Extra startup logging to stderr |
+
+<a id="guides"></a>
+
+## 📚 Guides
+
+| | |
+|---|---|
+| [QUICKSTART.md](docs/QUICKSTART.md) | From clone to a working client, with least-privilege access and a checklist |
+| [CLIENTS.md](docs/CLIENTS.md) | Claude Code, Claude Desktop, several clusters, settings, troubleshooting |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How a call flows, namespace rules, every tool's API call and RBAC, known limits |
+| [deploy/rbac.yaml](deploy/rbac.yaml) | The service account, roles and bindings |
 
 <a id="troubleshooting"></a>
 
@@ -155,25 +182,31 @@ That's RBAC working. The kubeconfig's identity isn't allowed to do that. To allo
 </details>
 
 <details>
+<summary><b>409 Conflict from apply_manifest</b></summary>
+
+The object already exists. `apply_manifest` only creates; use `scale_deployment`, or delete and re-create.
+</details>
+
+<details>
 <summary><b>Tools don't show up in Claude</b></summary>
 
-Use absolute paths, check the config is valid JSON, and quit Claude Desktop completely before reopening it. Set `K3S_DEBUG=true` and check Claude's logs.
+Use absolute paths, check the config is valid JSON, and quit Claude Desktop completely before reopening it. Then check the client's log for the server's stderr. More in [CLIENTS.md](docs/CLIENTS.md#troubleshooting).
 </details>
 
 ## 🧱 Project layout
 
 ```
 src/k3s_mcp_server/server.py   the server that gets packaged and installed (13 tools)
-docs/                          guides (quickstart, Claude Desktop, Cortex), ARCHITECTURE.md and the animations on this page
+docs/                          QUICKSTART, CLIENTS and ARCHITECTURE guides, and the animations on this page
 scripts/                       setup.sh and test-connection.sh
 deploy/rbac.yaml               a least-privilege service account for the server
 ```
 
 Dependencies: `mcp`, `kubernetes` (the official client) and `pyyaml`.
 
-## 🌐 Part of Cortex
+## 🌐 Origins
 
-This server is one of the infrastructure tools behind the Cortex platform. See [CORTEX-INTEGRATION.md](docs/CORTEX-INTEGRATION.md) for how it fits in, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+Built as one of the infrastructure tools for the [Cortex](https://github.com/ry-ops/cortex) platform, which is now archived. The server doesn't depend on Cortex and runs against any cluster.
 
 ## License
 
