@@ -101,9 +101,9 @@ You need **Python 3.10+** with [`uv`](https://github.com/astral-sh/uv), and a ku
 
 ```bash
 git clone https://github.com/ry-ops/k3s-mcp-server && cd k3s-mcp-server
-scripts/setup.sh                          # or: uv sync
+bash scripts/setup.sh                     # or: uv sync
 export KUBECONFIG="$HOME/.kube/config"    # see the note below
-scripts/test-connection.sh
+bash scripts/test-connection.sh
 ```
 
 > [!NOTE]

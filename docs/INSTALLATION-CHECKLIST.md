@@ -12,7 +12,7 @@ Use this checklist to verify your installation is complete and ready.
 ## Installation Steps
 
 - [ ] Clone/download project to `~/Projects/k3s-mcp-server`
-- [ ] Run setup script: `scripts/setup.sh`
+- [ ] Run setup script: `bash scripts/setup.sh`
 - [ ] Verify dependencies installed: `uv sync` completes successfully
 - [ ] Test package import: `uv run python -c "import k3s_mcp_server; print(k3s_mcp_server.__version__)"`
 
@@ -57,7 +57,7 @@ Use this checklist to verify your installation is complete and ready.
 
 - [ ] Check Claude Desktop logs for errors
 - [ ] Enable debug mode: `"K3S_DEBUG": "true"` in config
-- [ ] Test connection manually: `scripts/test-connection.sh`
+- [ ] Test connection manually: `bash scripts/test-connection.sh`
 - [ ] Verify kubeconfig: `kubectl --kubeconfig ~/.kube/k3s-cortex-config.yaml cluster-info`
 - [ ] Review troubleshooting section in [README.md](../README.md#troubleshooting)
 
