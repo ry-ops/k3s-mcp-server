@@ -34,7 +34,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.0.0,<2",
     "kubernetes>=29.0.0",
     "pyyaml>=6.0.1",
 ]
@@ -46,7 +46,7 @@ Repository = "https://github.com/ry-ops/k3s-mcp-server"
 Issues = "https://github.com/ry-ops/k3s-mcp-server/issues"
 
 [project.scripts]
-k3s-mcp-server = "k3s_mcp_server.server:main"
+k3s-mcp-server = "k3s_mcp_server.server:run"
 
 [build-system]
 requires = ["hatchling"]

@@ -811,6 +811,11 @@ async def main():
         )
 
 
-if __name__ == "__main__":
+def run():
+    """Console-script entry point."""
     import asyncio
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()
