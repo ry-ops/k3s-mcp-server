@@ -237,7 +237,7 @@ For the Cortex automation system:
 
 ## Next Steps
 
-- Read [README.md](README.md) for complete documentation
+- Read [README.md](../README.md) for complete documentation
 - Explore all available tools in Claude
 - Set up custom namespaces and RBAC if needed
 - Integrate with Cortex automation workflows

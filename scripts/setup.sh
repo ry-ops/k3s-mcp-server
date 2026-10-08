@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Run from the repo root, wherever the script is called from
+cd "$(dirname "$0")/.."
+
 echo "=================================================="
 echo "K3s MCP Server Setup"
 echo "=================================================="
@@ -15,22 +18,15 @@ fi
 
 echo "✓ Found uv package manager"
 
-# Create directory structure
-echo ""
-echo "Creating project structure..."
-
-mkdir -p k3s_mcp_server
-echo "✓ Created k3s_mcp_server directory"
-
-# Check if files exist
-if [ ! -f "k3s_mcp_server/__init__.py" ]; then
-    echo "Error: k3s_mcp_server/__init__.py not found"
+# Check the package files are in place
+if [ ! -f "src/k3s_mcp_server/__init__.py" ]; then
+    echo "Error: src/k3s_mcp_server/__init__.py not found"
     echo "Please ensure the package files are in place"
     exit 1
 fi
 
-if [ ! -f "k3s_mcp_server/server.py" ]; then
-    echo "Error: k3s_mcp_server/server.py not found"
+if [ ! -f "src/k3s_mcp_server/server.py" ]; then
+    echo "Error: src/k3s_mcp_server/server.py not found"
     echo "Please ensure the package files are in place"
     exit 1
 fi
@@ -49,12 +45,12 @@ echo "✓ Dependencies installed"
 echo ""
 echo "Checking for kubeconfig..."
 
-KUBECONFIG_DEFAULT="$HOME/.kube/k3s-cortex-config.yaml"
+KUBECONFIG_PATH="${KUBECONFIG:-$HOME/.kube/k3s-cortex-config.yaml}"
 
-if [ -f "$KUBECONFIG_DEFAULT" ]; then
-    echo "✓ Found kubeconfig at $KUBECONFIG_DEFAULT"
+if [ -f "$KUBECONFIG_PATH" ]; then
+    echo "✓ Found kubeconfig at $KUBECONFIG_PATH"
 else
-    echo "⚠ Kubeconfig not found at $KUBECONFIG_DEFAULT"
+    echo "⚠ Kubeconfig not found at $KUBECONFIG_PATH"
     echo ""
     echo "Please ensure your kubeconfig is at one of these locations:"
     echo "  - $HOME/.kube/k3s-cortex-config.yaml (default)"
@@ -71,10 +67,10 @@ echo ""
 echo "Next steps:"
 echo ""
 echo "1. Ensure your kubeconfig is available:"
-echo "   export KUBECONFIG=\"$HOME/.kube/k3s-cortex-config.yaml\""
+echo "   export KUBECONFIG=\"$KUBECONFIG_PATH\""
 echo ""
 echo "2. Test the server:"
-echo "   ./test-connection.sh"
+echo "   scripts/test-connection.sh"
 echo ""
 echo "3. Configure Claude Desktop:"
 echo "   Edit: ~/Library/Application Support/Claude/claude_desktop_config.json"
@@ -86,7 +82,7 @@ echo '       "k3s": {'
 echo '         "command": "uv",'
 echo '         "args": ["--directory", "'$(pwd)'", "run", "k3s-mcp-server"],'
 echo '         "env": {'
-echo '           "KUBECONFIG": "'$HOME'/.kube/k3s-cortex-config.yaml"'
+echo '           "KUBECONFIG": "'$KUBECONFIG_PATH'"'
 echo '         }'
 echo '       }'
 echo '     }'

@@ -12,7 +12,7 @@ Use this checklist to verify your installation is complete and ready.
 ## Installation Steps
 
 - [ ] Clone/download project to `~/Projects/k3s-mcp-server`
-- [ ] Run setup script: `./setup.sh`
+- [ ] Run setup script: `scripts/setup.sh`
 - [ ] Verify dependencies installed: `uv sync` completes successfully
 - [ ] Test package import: `uv run python -c "import k3s_mcp_server; print(k3s_mcp_server.__version__)"`
 
@@ -29,7 +29,7 @@ Use this checklist to verify your installation is complete and ready.
   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
   - Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 - [ ] Edit configuration file
-- [ ] Add k3s-mcp-server configuration (see claude-config-example.json)
+- [ ] Add k3s-mcp-server configuration (see the Setup section of [README.md](../README.md#setup))
 - [ ] Verify JSON is valid: `python3 -m json.tool claude_desktop_config.json`
 - [ ] Use absolute paths (not `~` or relative)
 - [ ] Save configuration file
@@ -57,13 +57,13 @@ Use this checklist to verify your installation is complete and ready.
 
 - [ ] Check Claude Desktop logs for errors
 - [ ] Enable debug mode: `"K3S_DEBUG": "true"` in config
-- [ ] Test connection manually: `./test-connection.sh`
+- [ ] Test connection manually: `scripts/test-connection.sh`
 - [ ] Verify kubeconfig: `kubectl --kubeconfig ~/.kube/k3s-cortex-config.yaml cluster-info`
-- [ ] Review troubleshooting section in README.md
+- [ ] Review troubleshooting section in [README.md](../README.md#troubleshooting)
 
 ## Post-Installation
 
-- [ ] Review CORTEX-INTEGRATION.md for Cortex-specific use cases
+- [ ] Review [CORTEX-INTEGRATION.md](CORTEX-INTEGRATION.md) for Cortex-specific use cases
 - [ ] Test Cortex-specific queries
 - [ ] Set up monitoring/alerting as needed
 - [ ] Document any custom configurations

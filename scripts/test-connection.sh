@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Run from the repo root, wherever the script is called from
+cd "$(dirname "$0")/.."
+
 echo "=================================================="
 echo "K3s MCP Server Connection Test"
 echo "=================================================="
@@ -59,9 +62,9 @@ echo "Testing K3s MCP Server"
 echo "=================================================="
 echo ""
 
-# Create test script
-cat > /tmp/test_k3s_mcp.py <<'EOF'
-#!/usr/bin/env python3
+# Run the test through the server's own client
+export KUBECONFIG="$KUBECONFIG_PATH"
+uv run python - <<'EOF'
 import os
 import sys
 import asyncio
@@ -75,18 +78,18 @@ print(f"Using kubeconfig: {kubeconfig_path}")
 print("")
 
 try:
-    from k3s_mcp_server.server import k3s_client
+    from k3s_mcp_server.server import k3s
 
     async def test():
         print("Testing cluster connectivity...")
 
         # Test cluster info
         try:
-            info = await k3s_client.get_cluster_info()
+            info = await k3s.get_cluster_info()
             print(f"✓ Connected to cluster")
             print(f"  Version: {info['version']['git_version']}")
-            print(f"  Nodes: {info['node_count']}")
-            print(f"  Namespaces: {info['namespace_count']}")
+            print(f"  Nodes: {info['nodes']['ready']}/{info['nodes']['total']} Ready")
+            print(f"  Namespaces: {info['namespaces']['total']}")
             print("")
         except Exception as e:
             print(f"✗ Failed to get cluster info: {e}")
@@ -94,9 +97,9 @@ try:
 
         # Test listing nodes
         try:
-            nodes = await k3s_client.get_nodes()
-            print(f"✓ Listed {nodes['count']} nodes")
-            for node in nodes['nodes']:
+            nodes = await k3s.get_nodes()
+            print(f"✓ Listed {len(nodes)} nodes")
+            for node in nodes:
                 print(f"  - {node['name']}: {node['status']}")
             print("")
         except Exception as e:
@@ -105,8 +108,8 @@ try:
 
         # Test listing namespaces
         try:
-            namespaces = await k3s_client.get_namespaces()
-            print(f"✓ Listed {namespaces['count']} namespaces")
+            namespaces = await k3s.get_namespaces()
+            print(f"✓ Listed {len(namespaces)} namespaces")
             print("")
         except Exception as e:
             print(f"✗ Failed to list namespaces: {e}")
@@ -114,8 +117,8 @@ try:
 
         # Test listing pods
         try:
-            pods = await k3s_client.get_pods()
-            print(f"✓ Listed {pods['count']} pods across all namespaces")
+            pods = await k3s.get_pods()
+            print(f"✓ Listed {len(pods)} pods across all namespaces")
             print("")
         except Exception as e:
             print(f"✗ Failed to list pods: {e}")
@@ -151,10 +154,3 @@ except Exception as e:
     print(f"Error: {e}")
     sys.exit(1)
 EOF
-
-# Run test
-export KUBECONFIG="$KUBECONFIG_PATH"
-uv run python /tmp/test_k3s_mcp.py
-
-# Cleanup
-rm /tmp/test_k3s_mcp.py

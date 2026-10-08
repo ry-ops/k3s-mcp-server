@@ -327,7 +327,7 @@ After configuring Claude Desktop:
 If you're still having issues:
 
 1. Review [QUICKSTART.md](QUICKSTART.md)
-2. Check [README.md](README.md) troubleshooting section
+2. Check [README.md](../README.md) troubleshooting section
 3. Test the server manually (see above)
 4. Check Claude Desktop logs
 5. Verify kubeconfig with kubectl
