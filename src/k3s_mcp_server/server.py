@@ -15,7 +15,7 @@ Configuration via environment variables:
 
 Author: ry-ops
 License: MIT
-Version: 1.0.0
+Version: 1.1.0
 """
 
 import os
@@ -33,6 +33,8 @@ from kubernetes.stream import stream
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 import mcp.server.stdio
+
+from k3s_mcp_server import __version__
 
 
 # Configuration
@@ -539,7 +541,7 @@ class K3sClient:
 k3s = K3sClient()
 
 # Initialize MCP server
-app = Server("k3s-mcp-server")
+app = Server("k3s-mcp-server", version=__version__)
 
 
 # Define tools

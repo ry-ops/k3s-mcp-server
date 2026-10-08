@@ -1,289 +1,110 @@
-# Quick Start Guide
+# Quickstart
 
-Get up and running with the K3s MCP Server in 5 minutes!
+From a fresh clone to Claude listing your nodes. Most of the time goes to step 3.
 
-## 1. Install Dependencies
+You need:
 
-```bash
-# Install uv (if not already installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+- **Python 3.10+** and [`uv`](https://github.com/astral-sh/uv)
+- A **K3s cluster** (or any Kubernetes cluster) whose API server, port `6443`, you can reach from this machine
+- **Admin access** to the cluster once, to create the server's own identity. `kubectl` on your machine is easiest; the `kubectl` that ships with K3s on a server node works too.
 
-# Navigate to project directory
-cd ~/Projects/k3s-mcp-server
-
-# Install project dependencies
-uv sync
-```
-
-## 2. Get Kubeconfig from K3s Server
-
-### Option A: Copy from K3s Server
+## 1. Install
 
 ```bash
-# SSH to your K3s server
-ssh user@10.88.145.180
-
-# View kubeconfig
-sudo cat /etc/rancher/k3s/k3s.yaml
-
-# Copy the output to your local machine
+git clone https://github.com/ry-ops/k3s-mcp-server && cd k3s-mcp-server
+bash scripts/setup.sh        # checks uv, runs uv sync
 ```
 
-### Option B: Use Existing Kubeconfig
+`uv sync` on its own does the same install.
 
-If you already have a kubeconfig file:
+## 2. Get an admin kubeconfig
+
+On a K3s server node the admin kubeconfig is `/etc/rancher/k3s/k3s.yaml`. Copy it to your machine and point it at the node's address, because K3s writes `127.0.0.1`:
 
 ```bash
-# Copy to standard location
-cp /path/to/your/k3s-config.yaml ~/.kube/k3s-cortex-config.yaml
-
-# Or set KUBECONFIG to point to it
-export KUBECONFIG="/path/to/your/k3s-config.yaml"
+scp root@<server-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/k3s-admin.yaml
+sed -i.bak 's/127.0.0.1/<server-ip>/' ~/.kube/k3s-admin.yaml && rm ~/.kube/k3s-admin.yaml.bak
+chmod 600 ~/.kube/k3s-admin.yaml
+export KUBECONFIG=~/.kube/k3s-admin.yaml
+kubectl get nodes
 ```
 
-### Update Server Address
+This file is **cluster-admin**. Use it to set things up, not as the server's kubeconfig.
 
-Edit `~/.kube/k3s-cortex-config.yaml` and update the server address:
+## 3. Give the server its own identity
 
-```yaml
-apiVersion: v1
-clusters:
-- cluster:
-    server: https://10.88.145.180:6443  # Change from https://127.0.0.1:6443
-    # ... rest of config
-```
+The server can do anything its kubeconfig allows, including deleting resources and running commands inside pods. [`deploy/rbac.yaml`](../deploy/rbac.yaml) creates a `k3s-mcp` service account that can read across the cluster but write only in the namespaces you choose.
 
-## 3. Verify kubectl Access
+1. Open `deploy/rbac.yaml` and set the `namespace` of the `k3s-mcp-edit` RoleBinding (at the bottom) to the namespace you want the server to change. Copy the block for more namespaces, or delete it for read-only.
+2. Follow the commands in the README's [Safety](../README.md#safety) section. They apply the file and write `~/.kube/k3s-mcp.yaml`, a kubeconfig that holds only the service account's token.
+
+## 4. Check the connection
 
 ```bash
-# Test connection to K3s cluster
-kubectl --kubeconfig ~/.kube/k3s-cortex-config.yaml get nodes
-
-# Should show your K3s nodes like:
-# NAME     STATUS   ROLES                  AGE   VERSION
-# k3s-01   Ready    control-plane,master   30d   v1.28.5+k3s1
+export KUBECONFIG=~/.kube/k3s-mcp.yaml
+bash scripts/test-connection.sh
 ```
 
-## 4. Test the MCP Server
+It loads the server's own client and reads the cluster through it. You should see:
+
+```
+✓ Connected to cluster
+  Version: v1.36.5+k3s1
+  Nodes: 3/3 Ready
+✓ Listed 3 nodes
+✓ Listed 7 namespaces
+✓ Listed 17 pods across all namespaces
+✓ All tests passed!
+```
+
+## 5. Connect Claude
+
+**Claude Code**: one command, available in every project:
 
 ```bash
-# Set kubeconfig path
-export KUBECONFIG="/Users/yourusername/.kube/k3s-cortex-config.yaml"
-
-# Run the server
-uv run k3s-mcp-server
+claude mcp add k3s --scope user \
+  -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" \
+  -- uv --directory "$PWD" run k3s-mcp-server
+claude mcp get k3s           # Status: ✔ Connected
 ```
 
-You should see:
-```
-Starting K3s MCP Server...
-Using kubeconfig: /Users/yourusername/.kube/k3s-cortex-config.yaml
-Default namespace: default
-Loaded kubeconfig from: /Users/yourusername/.kube/k3s-cortex-config.yaml
-```
+**Claude Desktop**: see [CLIENTS.md](CLIENTS.md#claude-desktop).
 
-Press `Ctrl+C` to stop.
+Start a new session so the tools load.
 
-## 5. Configure Claude Desktop
+## 6. Try it
 
-Edit config file:
-- **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+Each of these maps onto one or two of the 13 tools:
 
-Add this configuration (replace paths with yours):
+| Ask | Tool |
+|---|---|
+| *"Which nodes are Ready, and what are they running?"* | `get_nodes` |
+| *"What's running in the `demo` namespace?"* | `get_pods` |
+| *"Show pods labelled `app=web`."* | `get_pods` with a label selector |
+| *"Describe the `web` deployment."* | `get_deployment` |
+| *"Show the last 50 log lines from the api pod."* | `get_pods`, then `get_logs` |
+| *"Scale `web` to 3 replicas."* | `scale_deployment` |
+| *"Restart the stuck worker pod."* | `restart_pod` |
+| *"Run `df -h` in the api container."* | `execute_command` |
+| *"Create this deployment: …"* (paste YAML) | `apply_manifest` |
 
-```json
-{
-  "mcpServers": {
-    "k3s": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/Users/yourusername/Projects/k3s-mcp-server",
-        "run",
-        "k3s-mcp-server"
-      ],
-      "env": {
-        "KUBECONFIG": "/Users/yourusername/.kube/k3s-cortex-config.yaml"
-      }
-    }
-  }
-}
-```
+Writes outside the namespaces you gave `edit` come back as `403 Forbidden`. That's the RBAC from step 3 doing its job.
 
-**Important**:
-- Use absolute paths (not `~` or relative paths)
-- Replace `yourusername` with your actual username
-- Ensure the kubeconfig path is correct
+### What it can't do
 
-## 6. Restart Claude Desktop
+- **Update an existing object from YAML.** `apply_manifest` only creates, so a name that already exists fails with `409 Conflict`. Use `scale_deployment`, or delete and re-create.
+- **Kinds other than Pod, Deployment and Service** for `apply_manifest` and `delete_resource`.
+- **Events, metrics or CPU and memory usage.** `get_nodes` shows capacity, not usage.
+- **Follow logs.** `get_logs` returns the last *N* lines (100 by default).
 
-Completely quit and restart Claude Desktop (don't just close the window).
+## Checklist
 
-**MacOS**: Quit Claude completely with `Cmd+Q`
+- [ ] `uv sync` (or `bash scripts/setup.sh`) completes
+- [ ] The admin kubeconfig's `server:` is the node's address, not `127.0.0.1`
+- [ ] `deploy/rbac.yaml` applied, with `edit` only where you want writes
+- [ ] `~/.kube/k3s-mcp.yaml` written, mode `600`
+- [ ] `bash scripts/test-connection.sh` passes with that kubeconfig
+- [ ] Your client shows `k3s` as connected and lists 13 tools
+- [ ] A read works, and a write outside your `edit` namespaces returns `403`
 
-## 7. Test It!
-
-Open a new conversation in Claude and try:
-
-```
-List all pods in my K3s cluster
-```
-
-```
-Show me all deployments
-```
-
-```
-What's the status of all nodes?
-```
-
-```
-Get cluster information
-```
-
-That's it! 🎉
-
-## Common Issues
-
-### "Kubeconfig not found"
-
-**Fix:**
-- Verify the path in your env variable is correct
-- Use absolute path (not `~`)
-- Check file exists: `ls -la /Users/yourusername/.kube/k3s-cortex-config.yaml`
-
-### "Connection refused"
-
-**Fix:**
-- Check network connectivity: `ping 10.88.145.180`
-- Verify server address in kubeconfig is correct (not 127.0.0.1)
-- Ensure K3s is running: `ssh user@10.88.145.180 "sudo systemctl status k3s"`
-
-### "Authentication failed"
-
-**Fix:**
-- Verify kubeconfig credentials are valid
-- Check certificates haven't expired
-- Test with kubectl: `kubectl --kubeconfig /path/to/config get nodes`
-
-### "Tools not showing in Claude"
-
-**Fix:**
-1. Validate JSON config (use a JSON validator)
-2. Use absolute paths (not `~` or relative)
-3. Completely quit Claude (Cmd+Q on Mac)
-4. Check Claude Desktop logs:
-   - **MacOS**: `~/Library/Logs/Claude/`
-   - **Windows**: `%APPDATA%/Claude/logs/`
-
-### "Permission denied"
-
-**Fix:**
-- Check RBAC permissions in K3s
-- Test permissions: `kubectl --kubeconfig /path/to/config auth can-i get pods`
-- May need to create service account with proper roles
-
-## Example Queries for Claude
-
-Once working, try these commands:
-
-### Basic Information
-```
-"Show me cluster information"
-"List all namespaces"
-"What nodes are in my cluster?"
-```
-
-### Pods
-```
-"List all pods"
-"Show me pods in the cortex namespace"
-"Get logs from pod cortex-dashboard-xxxxx"
-"Restart the failing pod in default namespace"
-```
-
-### Deployments
-```
-"List all deployments"
-"What's the status of the eui-dashboard deployment?"
-"Scale cortex-dashboard to 2 replicas"
-```
-
-### Services
-```
-"Show all services"
-"What services are in the monitoring namespace?"
-```
-
-### Advanced
-```
-"Execute 'df -h' in pod cortex-dashboard-xxxxx to check disk usage"
-"Show me the last 50 lines of logs from the development-master pod"
-"Apply this manifest: [paste YAML]"
-```
-
-## Cortex-Specific Examples
-
-For the Cortex automation system:
-
-```
-"Show me all cortex-related pods"
-"What's the status of the development master?"
-"List all deployments in the cortex namespace"
-"Get logs from the latest coordinator-master pod"
-"Scale the eui-dashboard to handle more traffic"
-```
-
-## Next Steps
-
-- Read [README.md](../README.md) for complete documentation
-- Explore all available tools in Claude
-- Set up custom namespaces and RBAC if needed
-- Integrate with Cortex automation workflows
-
-## Security Reminder
-
-- Never commit kubeconfig to git
-- Keep kubeconfig file permissions restricted: `chmod 600 ~/.kube/k3s-cortex-config.yaml`
-- Consider using service accounts instead of admin credentials for production
-- Audit K8s API access regularly
-
-## Getting Help
-
-If you're stuck:
-
-1. **Verify kubectl works**: `kubectl --kubeconfig /path/to/config get nodes`
-2. **Check server logs**: Enable debug mode with `K3S_DEBUG=true`
-3. **Test MCP server**: Run `uv run k3s-mcp-server` manually
-4. **Check Claude logs**: Look for errors in Claude Desktop logs
-5. **Review README**: Check the troubleshooting section
-
-## Quick Reference
-
-### Environment Variables
-```bash
-export KUBECONFIG="/path/to/k3s-cortex-config.yaml"
-export K3S_DEFAULT_NAMESPACE="default"  # Optional
-export K3S_DEBUG="true"  # Optional
-```
-
-### Test Connection
-```bash
-# Test kubectl
-kubectl --kubeconfig ~/.kube/k3s-cortex-config.yaml get nodes
-
-# Test MCP server
-KUBECONFIG=~/.kube/k3s-cortex-config.yaml uv run k3s-mcp-server
-```
-
-### Claude Config Path
-```bash
-# MacOS
-open ~/Library/Application\ Support/Claude/
-
-# Or edit directly
-code ~/Library/Application\ Support/Claude/claude_desktop_config.json
-```
-
-Happy K3s management with Claude! 🚀
+Stuck? See [CLIENTS.md → Troubleshooting](CLIENTS.md#troubleshooting).
