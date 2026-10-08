@@ -101,9 +101,9 @@ You need **Python 3.10+** with [`uv`](https://github.com/astral-sh/uv), and a ku
 
 ```bash
 git clone https://github.com/ry-ops/k3s-mcp-server && cd k3s-mcp-server
-./setup.sh                                # or: uv sync
+bash scripts/setup.sh                     # or: uv sync
 export KUBECONFIG="$HOME/.kube/config"    # see the note below
-./test-connection.sh
+bash scripts/test-connection.sh
 ```
 
 > [!NOTE]
@@ -129,7 +129,7 @@ export KUBECONFIG="$HOME/.kube/config"    # see the note below
 }
 ```
 
-Restart Claude Desktop completely. There's more in [QUICKSTART.md](QUICKSTART.md), [CLAUDE-DESKTOP-CONFIG.md](CLAUDE-DESKTOP-CONFIG.md) and [INSTALLATION-CHECKLIST.md](INSTALLATION-CHECKLIST.md).
+Restart Claude Desktop completely. There's more in [QUICKSTART.md](docs/QUICKSTART.md), [CLAUDE-DESKTOP-CONFIG.md](docs/CLAUDE-DESKTOP-CONFIG.md) and [INSTALLATION-CHECKLIST.md](docs/INSTALLATION-CHECKLIST.md).
 
 <a id="troubleshooting"></a>
 
@@ -164,8 +164,8 @@ Use absolute paths, check the config is valid JSON, and quit Claude Desktop comp
 
 ```
 src/k3s_mcp_server/server.py   the server that gets packaged and installed (13 tools)
-docs/                          ARCHITECTURE.md and the animations on this page
-setup.sh, test-connection.sh   setup and a connection check
+docs/                          guides (quickstart, Claude Desktop, Cortex), ARCHITECTURE.md and the animations on this page
+scripts/                       setup.sh and test-connection.sh
 deploy/rbac.yaml               a least-privilege service account for the server
 ```
 
@@ -173,7 +173,7 @@ Dependencies: `mcp`, `kubernetes` (the official client) and `pyyaml`.
 
 ## 🌐 Part of Cortex
 
-This server is one of the infrastructure tools behind the Cortex platform. See [CORTEX-INTEGRATION.md](CORTEX-INTEGRATION.md) for how it fits in, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+This server is one of the infrastructure tools behind the Cortex platform. See [CORTEX-INTEGRATION.md](docs/CORTEX-INTEGRATION.md) for how it fits in, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 ## License
 
