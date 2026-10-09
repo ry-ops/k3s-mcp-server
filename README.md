@@ -7,11 +7,11 @@
   <img src="https://img.shields.io/badge/tools-36-ffc61c" alt="36 tools">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3ec7ff" alt="Python 3.10+"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-b58cff" alt="MCP"></a>
-  <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-and%20any%20Kubernetes-ff8a1f" alt="K3s"></a>
+  <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-ff8a1f" alt="K3s"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b96ad" alt="MIT"></a>
 </p>
 
-<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 36 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
+<p align="center"><b>Run your K3s cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 36 tools for K3s, built on the official Kubernetes Python client and your kubeconfig.</p>
 
 <p align="center">
   <a href="#tools">Tools</a> ·
@@ -34,6 +34,8 @@
 > *"Run `env` inside the api container."*
 > *"Create this deployment."* (paste the YAML)
 > *"Which nodes are Ready, and how much capacity do they have?"*
+> *"Build a K3s cluster called lab2 on these three VMs."* (with `K3S_PROVISIONING=true`)
+> *"Switch to lab2."*
 
 ## 🌟 Why this one
 
@@ -46,7 +48,7 @@
 - **Builds clusters too.** With [proxmox-mcp-server](https://github.com/ry-ops/proxmox-mcp-server) making the VMs, `create_cluster` turns them into a K3s cluster over SSH and hands it a scoped identity; join tokens and kubeconfigs never enter the conversation. Opt-in: see [PROVISIONING.md](docs/PROVISIONING.md).
 - **Any client, any number of clusters.** Works with Claude Code, Claude Desktop or any stdio MCP client. Drop scoped kubeconfigs in `~/.kube/clusters/` and switch with *"use lab2"*, no restart; every result names the cluster it came from.
 - **Checks itself first.** `scripts/test-connection.sh` runs the server's own client against your cluster before you connect a client.
-- **Small enough to read.** One Python module on the official Kubernetes client, with no database, no daemon and no state. [ARCHITECTURE.md](docs/ARCHITECTURE.md) maps every tool to its API call and the RBAC it needs.
+- **Small enough to read.** Two Python modules on the official Kubernetes client, one for the tools and one for building clusters, with no database, no daemon and no state. [ARCHITECTURE.md](docs/ARCHITECTURE.md) maps every tool to its API call and the RBAC it needs.
 
 <a id="tools"></a>
 
@@ -247,12 +249,12 @@ Planned, not built yet:
 ## 🧱 Project layout
 
 ```
-src/k3s_mcp_server/server.py   the server that gets packaged and installed (36 tools)
+src/k3s_mcp_server/server.py      the server that gets packaged and installed (36 tools)
 src/k3s_mcp_server/provision.py   cluster building over SSH: plan_cluster, create_cluster
-docs/                          QUICKSTART, CLIENTS, PROVISIONING and ARCHITECTURE guides, and the animations on this page
-scripts/                       setup.sh and test-connection.sh
-deploy/rbac.yaml               a least-privilege service account for the server
-deploy/rbac-node-ops.yaml      optional: node cordon and uncordon
+docs/                             QUICKSTART, CLIENTS, PROVISIONING and ARCHITECTURE guides, and the animations on this page
+scripts/                          setup.sh and test-connection.sh
+deploy/rbac.yaml                  a least-privilege service account for the server
+deploy/rbac-node-ops.yaml         optional: node cordon and uncordon
 ```
 
 Dependencies: `mcp`, `kubernetes` (the official client) and `pyyaml`.
