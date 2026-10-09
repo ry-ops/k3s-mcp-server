@@ -18,7 +18,7 @@
     @media (prefers-reduced-motion: reduce) { * { animation: none !important; } .re,.ok3,.ok4 { opacity: 0; } }
   </style>
   <rect width="960" height="490" rx="20" fill="#0f1420"/>
-  <text x="30" y="52" font-size="28" font-weight="800">30 tools · your RBAC decides</text>
+  <text x="30" y="52" font-size="28" font-weight="800">30 cluster tools · your RBAC decides</text>
   <text x="30" y="78" font-size="15" class="muted">There's no read-only switch: the kubeconfig you give it sets the limits.</text>
 
   <rect x="30" y="98" width="290" height="222" rx="12" fill="#3ddc84" fill-opacity=".08" stroke="#3ddc84" stroke-opacity=".5"/>

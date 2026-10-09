@@ -74,11 +74,12 @@ Start a new session so the tools load.
 
 ## 6. Try it
 
-Each of these maps onto one or two of the 30 tools:
+Each of these maps onto one or two of the 32 tools:
 
 | Ask | Tool |
 |---|---|
 | *"Which nodes are Ready, and what are they running?"* | `get_nodes` |
+| *"Switch to the lab2 cluster."* | `use_cluster` (see [CLIENTS.md](CLIENTS.md#several-clusters)) |
 | *"What's running in the `demo` namespace?"* | `get_pods` |
 | *"Show pods labelled `app=web`."* | `get_pods` with a label selector |
 | *"Describe the `web` deployment."* | `get_deployment` |
@@ -115,7 +116,7 @@ Writes outside the namespaces you gave `edit` come back as `403 Forbidden`. That
 - [ ] `deploy/rbac.yaml` applied, with `edit` only where you want writes
 - [ ] `~/.kube/k3s-mcp.yaml` written, mode `600`
 - [ ] `bash scripts/test-connection.sh` passes with that kubeconfig
-- [ ] Your client shows `k3s` as connected and lists 30 tools
+- [ ] Your client shows `k3s` as connected and lists 32 tools
 - [ ] A read works, and a write outside your `edit` namespaces returns `403`
 
 Stuck? See [CLIENTS.md → Troubleshooting](CLIENTS.md#troubleshooting).
