@@ -4,14 +4,14 @@
 
 <p align="center">
   <a href="https://github.com/ry-ops/k3s-mcp-server/releases/latest"><img src="https://img.shields.io/github/v/release/ry-ops/k3s-mcp-server?color=3fd68b" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/tools-16-ffc61c" alt="16 tools">
+  <img src="https://img.shields.io/badge/tools-23-ffc61c" alt="23 tools">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3ec7ff" alt="Python 3.10+"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-b58cff" alt="MCP"></a>
   <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-and%20any%20Kubernetes-ff8a1f" alt="K3s"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b96ad" alt="MIT"></a>
 </p>
 
-<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 16 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
+<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 23 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
 
 <p align="center">
   <a href="#tools">Tools</a> ·
@@ -36,9 +36,9 @@
 
 ## 🌟 Why this one
 
-- **Reads and writes, 16 tools.** Pods, deployments, services, nodes, namespaces and logs to look; scale, restart, exec, apply and delete to act.
+- **Reads and writes, 23 tools.** Workloads (deployments, StatefulSets, DaemonSets, Jobs, CronJobs), networking (services, ingresses), config and storage (ConfigMaps, volume claims), nodes and logs to look; scale, restart, exec, apply and delete to act.
 - **Built for troubleshooting.** Events, a pod's container states and exit codes, logs from the crashed container, and live CPU and memory from metrics-server, so *"why is this pod crash-looping?"* gets a real answer.
-- **Apply like kubectl.** `apply_manifest` uses server-side apply: it creates or updates, takes several YAML documents at once, handles any kind including custom resources, and has a dry run.
+- **Apply like kubectl.** `apply_manifest` uses server-side apply: it creates or updates, takes several YAML documents at once, handles any kind including custom resources, and has a dry run. `delete_resource` takes any kind too, with its own dry run.
 - **Least privilege, ready to apply.** [`deploy/rbac.yaml`](deploy/rbac.yaml) gives the server its own service account: it can read everywhere, write only in the namespaces you pick, and never read Secrets outside them. Delete one Secret to cut it off.
 - **Cluster-wide by default.** List tools search every namespace unless you name one, and label selectors narrow them down.
 - **Any client, any number of clusters.** Works with Claude Code, Claude Desktop or any stdio MCP client. Register it once per kubeconfig and say *"on k3s-prod, …"*.
@@ -50,14 +50,19 @@
 ## 🧰 Tools
 
 <p align="center">
-  <img src="docs/rbac.svg" width="100%" alt="Eleven tools look and five change things. With a view role, get_pods is allowed and delete_resource gets 403 Forbidden; with an edit role on one namespace, both are allowed there.">
+  <img src="docs/rbac.svg" width="100%" alt="Eighteen tools look and five change things. With a view role, get_pods is allowed and delete_resource gets 403 Forbidden; with an edit role on one namespace, both are allowed there.">
 </p>
 
 | | Tool | What it does |
 |---|---|---|
 | 👀 | `get_pods` | Pods in one namespace or all of them, filtered by label, with status, node, IPs and restart counts |
 | 👀 | `get_deployments` · `get_deployment` | Deployments in one namespace or all of them, or the details of one |
+| 👀 | `get_statefulsets` · `get_daemonsets` | StatefulSets and DaemonSets with replica or scheduling counts and images |
+| 👀 | `get_jobs` · `get_cronjobs` | Jobs with their outcome and failure reason; CronJobs with schedule and last runs |
 | 👀 | `get_services` | Services in one namespace or all of them |
+| 👀 | `get_ingresses` | Ingresses with hosts, paths, backend services, TLS hosts and addresses |
+| 👀 | `get_configmaps` | ConfigMaps and their keys, or one ConfigMap's data |
+| 👀 | `get_pvcs` | Volume claims with status, size, storage class and bound volume |
 | 👀 | `get_nodes` | Nodes with roles, Ready and pressure conditions, versions, OS and capacity |
 | 👀 | `get_namespaces` | All namespaces |
 | 👀 | `get_logs` | A pod's logs; choose the container and how many lines to tail, or read the previous (crashed) container's logs |
@@ -69,7 +74,7 @@
 | ✏️ | `restart_pod` | Delete a pod so its controller recreates it |
 | ✏️ | `execute_command` | Run a command in a pod's container |
 | ✏️ | `apply_manifest` | Server-side apply of YAML: create or update any kind, several documents at once, with dry run and conflict reporting |
-| ✏️ | `delete_resource` | Delete a Pod, Deployment or Service |
+| ✏️ | `delete_resource` | Delete an object of any kind, by kind or short name (`deploy`, `cm`, `pvc`), with dry run |
 
 <a id="safety"></a>
 
@@ -79,6 +84,7 @@ There's **no read-only switch**. The server can do whatever the **kubeconfig** i
 
 - **Read** across the cluster (the built-in **`view`** role, plus nodes). It can't read Secrets.
 - **Write** only in the namespaces you give an **`edit`** RoleBinding. The file binds `default`; change it, copy the block for more namespaces, or delete it for read-only. Writes anywhere else fail with `403 Forbidden` at the API server.
+- **Custom resources** only if their CRD opts in. `view` and `edit` include a custom resource only when its ClusterRoles aggregate into them, and many CRDs, Traefik's among them, don't. Grant those kinds with your own Role if you want the server to manage them.
 
 Apply it with your admin kubeconfig, then build a kubeconfig for the server from the service account's token:
 
@@ -201,7 +207,7 @@ Use absolute paths, check the config is valid JSON, and quit Claude Desktop comp
 ## 🧱 Project layout
 
 ```
-src/k3s_mcp_server/server.py   the server that gets packaged and installed (16 tools)
+src/k3s_mcp_server/server.py   the server that gets packaged and installed (23 tools)
 docs/                          QUICKSTART, CLIENTS and ARCHITECTURE guides, and the animations on this page
 scripts/                       setup.sh and test-connection.sh
 deploy/rbac.yaml               a least-privilege service account for the server

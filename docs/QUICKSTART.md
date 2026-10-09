@@ -74,7 +74,7 @@ Start a new session so the tools load.
 
 ## 6. Try it
 
-Each of these maps onto one or two of the 16 tools:
+Each of these maps onto one or two of the 23 tools:
 
 | Ask | Tool |
 |---|---|
@@ -85,18 +85,22 @@ Each of these maps onto one or two of the 16 tools:
 | *"Show the last 50 log lines from the api pod."* | `get_pods`, then `get_logs` |
 | *"Why is the worker pod crash-looping?"* | `describe_pod`, then `get_logs` with `previous` |
 | *"Any warnings in `demo` lately?"* | `get_events` |
+| *"Did last night's backup job succeed?"* | `get_cronjobs`, then `get_jobs` |
+| *"Which hostnames route to the `web` service?"* | `get_ingresses` |
+| *"Are any volume claims stuck Pending?"* | `get_pvcs` |
 | *"Which nodes are busiest?"* | `get_resource_usage` |
 | *"Scale `web` to 3 replicas."* | `scale_deployment` |
 | *"Restart the stuck worker pod."* | `restart_pod` |
 | *"Run `df -h` in the api container."* | `execute_command` |
 | *"Apply this YAML: …"* (one or more documents) | `apply_manifest` |
 | *"Dry-run this change first."* | `apply_manifest` with `dry_run` |
+| *"Delete the old `report` CronJob."* | `delete_resource` |
 
 Writes outside the namespaces you gave `edit` come back as `403 Forbidden`. That's the RBAC from step 3 doing its job.
 
 ### What it can't do
 
-- **Delete kinds other than Pod, Deployment and Service.** `apply_manifest` takes any kind, but `delete_resource` doesn't yet.
+- **Read Secrets.** No tool does, on purpose: their values would end up in the conversation.
 - **Follow logs.** `get_logs` returns the last *N* lines (100 by default).
 
 ## Checklist
@@ -106,7 +110,7 @@ Writes outside the namespaces you gave `edit` come back as `403 Forbidden`. That
 - [ ] `deploy/rbac.yaml` applied, with `edit` only where you want writes
 - [ ] `~/.kube/k3s-mcp.yaml` written, mode `600`
 - [ ] `bash scripts/test-connection.sh` passes with that kubeconfig
-- [ ] Your client shows `k3s` as connected and lists 16 tools
+- [ ] Your client shows `k3s` as connected and lists 23 tools
 - [ ] A read works, and a write outside your `edit` namespaces returns `403`
 
 Stuck? See [CLIENTS.md → Troubleshooting](CLIENTS.md#troubleshooting).

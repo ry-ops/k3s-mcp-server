@@ -15,7 +15,7 @@ Configuration via environment variables:
 
 Author: ry-ops
 License: MIT
-Version: 1.2.0
+Version: 1.3.0
 """
 
 import os
@@ -293,6 +293,211 @@ class K3sClient:
             return [self._format_node_info(node) for node in nodes.items]
         except ApiException as e:
             raise Exception(f"Failed to list nodes: {e}")
+
+    @staticmethod
+    def _ts(value) -> Optional[str]:
+        """ISO timestamp or None."""
+        return value.isoformat() if value else None
+
+    @staticmethod
+    def _images(pod_spec) -> List[str]:
+        """Container images in a pod spec."""
+        return [c.image for c in pod_spec.containers] if pod_spec else []
+
+    def _list(self, namespaced_fn, all_fn, namespace: Optional[str], what: str,
+              labels: Optional[str] = None):
+        """List objects in one namespace or all of them."""
+        try:
+            if namespace:
+                return namespaced_fn(namespace=namespace, label_selector=labels or "").items
+            return all_fn(label_selector=labels or "").items
+        except ApiException as e:
+            raise Exception(f"Failed to list {what}: {e}")
+
+    async def get_statefulsets(self, namespace: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List StatefulSets with replica counts and images."""
+        items = self._list(self.apps_v1.list_namespaced_stateful_set,
+                           self.apps_v1.list_stateful_set_for_all_namespaces, namespace, "statefulsets")
+        return [
+            {
+                "name": s.metadata.name,
+                "namespace": s.metadata.namespace,
+                "replicas": s.spec.replicas,
+                "ready": s.status.ready_replicas or 0,
+                "updated": s.status.updated_replicas or 0,
+                "service": s.spec.service_name,
+                "images": self._images(s.spec.template.spec),
+                "created": self._ts(s.metadata.creation_timestamp),
+            }
+            for s in items
+        ]
+
+    async def get_daemonsets(self, namespace: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List DaemonSets with scheduling and readiness counts."""
+        items = self._list(self.apps_v1.list_namespaced_daemon_set,
+                           self.apps_v1.list_daemon_set_for_all_namespaces, namespace, "daemonsets")
+        return [
+            {
+                "name": d.metadata.name,
+                "namespace": d.metadata.namespace,
+                "desired": d.status.desired_number_scheduled,
+                "current": d.status.current_number_scheduled,
+                "ready": d.status.number_ready,
+                "updated": d.status.updated_number_scheduled or 0,
+                "available": d.status.number_available or 0,
+                "node_selector": d.spec.template.spec.node_selector or {},
+                "images": self._images(d.spec.template.spec),
+            }
+            for d in items
+        ]
+
+    async def get_jobs(self, namespace: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List Jobs with their outcome and the CronJob that created them."""
+        items = self._list(self.batch_v1.list_namespaced_job,
+                           self.batch_v1.list_job_for_all_namespaces, namespace, "jobs")
+        jobs = []
+        for j in items:
+            conditions = {c.type: c for c in j.status.conditions or [] if c.status == "True"}
+            if "Complete" in conditions:
+                status = "Complete"
+            elif "Failed" in conditions:
+                status = "Failed"
+            elif "Suspended" in conditions:
+                status = "Suspended"
+            else:
+                status = "Running" if j.status.active else "Pending"
+            failed = conditions.get("Failed")
+            jobs.append({
+                "name": j.metadata.name,
+                "namespace": j.metadata.namespace,
+                "status": status,
+                "reason": failed.reason if failed else None,
+                "completions": j.spec.completions,
+                "succeeded": j.status.succeeded or 0,
+                "failed": j.status.failed or 0,
+                "active": j.status.active or 0,
+                "started": self._ts(j.status.start_time),
+                "completed": self._ts(j.status.completion_time),
+                "owner": next((f"{o.kind}/{o.name}" for o in j.metadata.owner_references or []), None),
+            })
+        return jobs
+
+    async def get_cronjobs(self, namespace: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List CronJobs with schedule and last run times."""
+        items = self._list(self.batch_v1.list_namespaced_cron_job,
+                           self.batch_v1.list_cron_job_for_all_namespaces, namespace, "cronjobs")
+        return [
+            {
+                "name": c.metadata.name,
+                "namespace": c.metadata.namespace,
+                "schedule": c.spec.schedule,
+                "time_zone": c.spec.time_zone,
+                "suspended": bool(c.spec.suspend),
+                "active": len(c.status.active or []),
+                "last_scheduled": self._ts(c.status.last_schedule_time),
+                "last_successful": self._ts(c.status.last_successful_time),
+            }
+            for c in items
+        ]
+
+    async def get_ingresses(self, namespace: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List Ingresses with hosts, paths, backends, TLS and load balancer addresses."""
+        items = self._list(self.networking_v1.list_namespaced_ingress,
+                           self.networking_v1.list_ingress_for_all_namespaces, namespace, "ingresses")
+
+        def backend(b) -> Optional[str]:
+            if b is None:
+                return None
+            if b.service:
+                port = b.service.port.number or b.service.port.name if b.service.port else None
+                return f"{b.service.name}:{port}" if port else b.service.name
+            if b.resource:
+                return f"{b.resource.kind}/{b.resource.name}"
+            return None
+
+        ingresses = []
+        for i in items:
+            rules = []
+            for r in i.spec.rules or []:
+                paths = r.http.paths if r.http else []
+                rules.append({
+                    "host": r.host or "*",
+                    "paths": [
+                        {"path": p.path or "/", "type": p.path_type, "backend": backend(p.backend)}
+                        for p in paths
+                    ],
+                })
+            lb = i.status.load_balancer.ingress if i.status and i.status.load_balancer else None
+            ingresses.append({
+                "name": i.metadata.name,
+                "namespace": i.metadata.namespace,
+                "class": i.spec.ingress_class_name,
+                "rules": rules,
+                "default_backend": backend(i.spec.default_backend),
+                "tls_hosts": [h for t in i.spec.tls or [] for h in t.hosts or []],
+                "addresses": [a.ip or a.hostname for a in lb or []],
+            })
+        return ingresses
+
+    async def get_configmaps(self, namespace: Optional[str] = None,
+                             name: Optional[str] = None) -> Any:
+        """
+        List ConfigMaps with their keys, or return one ConfigMap's data.
+
+        Args:
+            namespace: Namespace (None lists all namespaces; required with name)
+            name: ConfigMap name; returns its data, with long values truncated
+
+        Returns:
+            List of ConfigMap summaries, or one ConfigMap's data
+        """
+        if name:
+            try:
+                cm = self.core_v1.read_namespaced_config_map(name=name, namespace=namespace)
+            except ApiException as e:
+                raise Exception(f"Failed to get configmap {name}: {e}")
+            limit = 4000
+            data = {
+                k: v if len(v) <= limit else v[:limit] + f"\n… [truncated, {len(v)} chars]"
+                for k, v in (cm.data or {}).items()
+            }
+            return {
+                "name": cm.metadata.name,
+                "namespace": cm.metadata.namespace,
+                "data": data,
+                "binary_keys": sorted((cm.binary_data or {}).keys()),
+            }
+
+        items = self._list(self.core_v1.list_namespaced_config_map,
+                           self.core_v1.list_config_map_for_all_namespaces, namespace, "configmaps")
+        return [
+            {
+                "name": c.metadata.name,
+                "namespace": c.metadata.namespace,
+                "keys": sorted((c.data or {}).keys()) + sorted((c.binary_data or {}).keys()),
+                "created": self._ts(c.metadata.creation_timestamp),
+            }
+            for c in items
+        ]
+
+    async def get_pvcs(self, namespace: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List PersistentVolumeClaims with status, size, storage class and bound volume."""
+        items = self._list(self.core_v1.list_namespaced_persistent_volume_claim,
+                           self.core_v1.list_persistent_volume_claim_for_all_namespaces,
+                           namespace, "persistentvolumeclaims")
+        return [
+            {
+                "name": c.metadata.name,
+                "namespace": c.metadata.namespace,
+                "status": c.status.phase,
+                "requested": (c.spec.resources.requests or {}).get("storage") if c.spec.resources else None,
+                "capacity": (c.status.capacity or {}).get("storage"),
+                "access_modes": c.spec.access_modes or [],
+                "storage_class": c.spec.storage_class_name,
+                "volume": c.spec.volume_name,
+            }
+            for c in items
+        ]
 
     async def scale_deployment(self, name: str, namespace: str, replicas: int) -> Dict[str, Any]:
         """
@@ -710,36 +915,78 @@ class K3sClient:
             "results": results,
         }
 
-    async def delete_resource(self, kind: str, name: str, namespace: str) -> Dict[str, Any]:
+    def _resolve_kind(self, kind: str, api_version: Optional[str] = None):
         """
-        Delete a Kubernetes resource.
+        Find the API resource for a kind, like kubectl does.
+
+        Accepts the kind (Deployment), plural (deployments), singular (deployment)
+        or short name (deploy), in any case. When a kind exists in several API
+        groups, the core and apps groups win; otherwise api_version is required.
+        """
+        resources = self.dynamic.resources
+        lowered = kind.lower()
+        filters = {} if api_version is None else {"api_version": api_version}
+
+        candidates = []
+        for kw in ({"kind": kind}, {"singular_name": lowered}, {"name": lowered},
+                   {"short_names": [lowered]}):
+            candidates.extend(resources.search(**kw, **filters))
+        if api_version is None:
+            # Case-insensitive match on the kind itself, e.g. "configmap"
+            candidates.extend(r for r in resources.search()
+                              if getattr(r, "kind", "").lower() == lowered)
+
+        unique = {}
+        for r in candidates:
+            if r.kind.endswith("List") or "/" in r.name:
+                continue
+            unique.setdefault((r.group_version, r.kind), r)
+        found = list(unique.values())
+
+        if not found:
+            where = f" in {api_version}" if api_version else ""
+            raise Exception(f"The cluster has no kind {kind!r}{where}")
+        if len(found) > 1:
+            preferred = [r for r in found if r.group_version in ("v1", "apps/v1")]
+            if len(preferred) == 1:
+                return preferred[0]
+            options = ", ".join(f"{r.group_version} {r.kind}" for r in found)
+            raise Exception(f"{kind!r} is ambiguous ({options}); pass api_version")
+        return found[0]
+
+    async def delete_resource(self, kind: str, name: str, namespace: str,
+                              api_version: Optional[str] = None,
+                              dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Delete a Kubernetes object of any kind, including custom resources.
 
         Args:
-            kind: Resource kind (Pod, Deployment, Service, etc.)
-            name: Resource name
-            namespace: Namespace
+            kind: Kind, plural, singular or short name (Deployment, deployments, deploy)
+            name: Object name
+            namespace: Namespace (ignored for cluster-scoped kinds)
+            api_version: API group/version, needed only when the kind is ambiguous
+            dry_run: Check the delete on the server without doing it
 
         Returns:
             Deletion status
         """
+        resource = self._resolve_kind(kind, api_version)
+        obj_namespace = namespace if resource.namespaced else None
+        # The API server reads delete options from the body when there is one and
+        # then ignores the query string, so dryRun must go in the body too.
+        options: Dict[str, Any] = {"propagationPolicy": "Background"}
+        if dry_run:
+            options["dryRun"] = ["All"]
         try:
-            if kind.lower() == "pod":
-                self.core_v1.delete_namespaced_pod(name=name, namespace=namespace)
-            elif kind.lower() == "deployment":
-                self.apps_v1.delete_namespaced_deployment(name=name, namespace=namespace)
-            elif kind.lower() == "service":
-                self.core_v1.delete_namespaced_service(name=name, namespace=namespace)
-            else:
-                raise Exception(f"Unsupported resource kind for deletion: {kind}")
-
-            return {
-                "kind": kind,
-                "name": name,
-                "namespace": namespace,
-                "status": "Deleted successfully"
-            }
+            resource.delete(name=name, namespace=obj_namespace, body=options)
         except ApiException as e:
-            raise Exception(f"Failed to delete {kind} {name}: {e}")
+            raise Exception(f"Failed to delete {resource.kind} {name}: {self._api_error_message(e)}")
+
+        result = {"kind": resource.kind, "api_version": resource.group_version, "name": name}
+        if obj_namespace:
+            result["namespace"] = obj_namespace
+        result["status"] = "Would be deleted (dry run)" if dry_run else "Deleted"
+        return result
 
     async def get_namespaces(self) -> List[Dict[str, Any]]:
         """
@@ -864,6 +1111,95 @@ TOOLS = [
         },
     ),
     Tool(
+        name="get_statefulsets",
+        description="List StatefulSets in a namespace or across all namespaces, with replica counts, governing service and images",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace to filter StatefulSets (omit for all namespaces)"
+                }
+            }
+        },
+    ),
+    Tool(
+        name="get_daemonsets",
+        description="List DaemonSets in a namespace or across all namespaces, with desired, ready and available counts, node selector and images",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace to filter DaemonSets (omit for all namespaces)"
+                }
+            }
+        },
+    ),
+    Tool(
+        name="get_jobs",
+        description="List Jobs in a namespace or across all namespaces, with status (Complete, Failed, Running), succeeded and failed counts, times and the CronJob that created them",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace to filter Jobs (omit for all namespaces)"
+                }
+            }
+        },
+    ),
+    Tool(
+        name="get_cronjobs",
+        description="List CronJobs in a namespace or across all namespaces, with schedule, suspended flag, active runs and last scheduled and successful times",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace to filter CronJobs (omit for all namespaces)"
+                }
+            }
+        },
+    ),
+    Tool(
+        name="get_ingresses",
+        description="List Ingresses in a namespace or across all namespaces, with class, hosts, paths and backend services, TLS hosts and load balancer addresses",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace to filter Ingresses (omit for all namespaces)"
+                }
+            }
+        },
+    ),
+    Tool(
+        name="get_configmaps",
+        description="List ConfigMaps with their keys, or pass a name to read one ConfigMap's data (long values are truncated)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "namespace": {"type": "string", "description": "Namespace (omit to list all namespaces; with name, defaults to the default namespace)"},
+                "name": {"type": "string", "description": "ConfigMap name, to return its data"}
+            }
+        },
+    ),
+    Tool(
+        name="get_pvcs",
+        description="List PersistentVolumeClaims in a namespace or across all namespaces, with status, requested and actual size, access modes, storage class and bound volume",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace to filter PersistentVolumeClaims (omit for all namespaces)"
+                }
+            }
+        },
+    ),
+    Tool(
         name="get_nodes",
         description="List all nodes in the cluster with resource information",
         inputSchema={"type": "object", "properties": {}},
@@ -982,13 +1318,15 @@ TOOLS = [
     ),
     Tool(
         name="delete_resource",
-        description="Delete a Kubernetes resource (Pod, Deployment, Service, etc.)",
+        description="Delete a Kubernetes object of any kind, including custom resources. Accepts kind, plural or short names (Deployment, deployments, deploy).",
         inputSchema={
             "type": "object",
             "properties": {
-                "kind": {"type": "string", "description": "Resource kind (Pod, Deployment, Service)"},
-                "name": {"type": "string", "description": "Resource name"},
-                "namespace": {"type": "string", "description": "Namespace (default: default)"}
+                "kind": {"type": "string", "description": "Kind, e.g. Pod, Deployment, ConfigMap, Ingress, or a custom resource kind"},
+                "name": {"type": "string", "description": "Object name"},
+                "namespace": {"type": "string", "description": "Namespace (default: default; ignored for cluster-scoped kinds)"},
+                "api_version": {"type": "string", "description": "API group/version, e.g. apps/v1; only needed when the kind exists in several groups"},
+                "dry_run": {"type": "boolean", "description": "Check the delete on the server without doing it (default: false)"}
             },
             "required": ["kind", "name"]
         },
@@ -1044,6 +1382,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
         elif name == "get_services":
             result = await k3s.get_services(namespace=arguments.get("namespace"))
+        elif name in ("get_statefulsets", "get_daemonsets", "get_jobs", "get_cronjobs",
+                      "get_ingresses", "get_pvcs"):
+            result = await getattr(k3s, name)(namespace=arguments.get("namespace"))
+        elif name == "get_configmaps":
+            namespace = arguments.get("namespace")
+            if arguments.get("name") and not namespace:
+                namespace = DEFAULT_NAMESPACE
+            result = await k3s.get_configmaps(namespace=namespace, name=arguments.get("name"))
         elif name == "get_nodes":
             result = await k3s.get_nodes()
         elif name == "scale_deployment":
@@ -1101,7 +1447,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await k3s.delete_resource(
                 kind=arguments["kind"],
                 name=arguments["name"],
-                namespace=arguments.get("namespace", DEFAULT_NAMESPACE)
+                namespace=arguments.get("namespace", DEFAULT_NAMESPACE),
+                api_version=arguments.get("api_version"),
+                dry_run=arguments.get("dry_run", False)
             )
         elif name == "get_namespaces":
             result = await k3s.get_namespaces()
