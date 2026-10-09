@@ -4,14 +4,14 @@
 
 <p align="center">
   <a href="https://github.com/ry-ops/k3s-mcp-server/releases/latest"><img src="https://img.shields.io/github/v/release/ry-ops/k3s-mcp-server?color=3fd68b" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/tools-32-ffc61c" alt="32 tools">
+  <img src="https://img.shields.io/badge/tools-36-ffc61c" alt="36 tools">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3ec7ff" alt="Python 3.10+"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-b58cff" alt="MCP"></a>
   <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-and%20any%20Kubernetes-ff8a1f" alt="K3s"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b96ad" alt="MIT"></a>
 </p>
 
-<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 32 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
+<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 36 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
 
 <p align="center">
   <a href="#tools">Tools</a> ·
@@ -37,12 +37,13 @@
 
 ## 🌟 Why this one
 
-- **Reads and writes, 32 tools.** Workloads (deployments, StatefulSets, DaemonSets, Jobs, CronJobs), networking (services, ingresses), config and storage (ConfigMaps, volume claims), nodes, logs and any custom resource to look; scale, restart, roll out, roll back, exec, apply, delete and cordon to act.
+- **Reads and writes, 36 tools.** Workloads (deployments, StatefulSets, DaemonSets, Jobs, CronJobs), networking (services, ingresses), config and storage (ConfigMaps, volume claims), nodes, logs and any custom resource to look; scale, restart, roll out, roll back, exec, apply, delete and cordon to act.
 - **Safe rollouts.** Restart a workload with a rolling update, watch it finish, see each revision's images, and roll a bad deploy back. A rollout stuck on a bad image is reported as failed, not left hanging.
 - **Built for troubleshooting.** Events, a pod's container states and exit codes, logs from the crashed container, and live CPU and memory from metrics-server, so *"why is this pod crash-looping?"* gets a real answer.
 - **Apply like kubectl.** `apply_manifest` uses server-side apply: it creates or updates, takes several YAML documents at once, handles any kind including custom resources, and has a dry run. `delete_resource` takes any kind too, with its own dry run.
 - **Least privilege, ready to apply.** [`deploy/rbac.yaml`](deploy/rbac.yaml) gives the server its own service account: it can read everywhere, write only in the namespaces you pick, and never read Secrets outside them. Delete one Secret to cut it off.
 - **Cluster-wide by default.** List tools search every namespace unless you name one, and label selectors narrow them down.
+- **Builds clusters too.** With [proxmox-mcp-server](https://github.com/ry-ops/proxmox-mcp-server) making the VMs, `create_cluster` turns them into a K3s cluster over SSH and hands it a scoped identity; join tokens and kubeconfigs never enter the conversation. Opt-in: see [PROVISIONING.md](docs/PROVISIONING.md).
 - **Any client, any number of clusters.** Works with Claude Code, Claude Desktop or any stdio MCP client. Drop scoped kubeconfigs in `~/.kube/clusters/` and switch with *"use lab2"*, no restart; every result names the cluster it came from.
 - **Checks itself first.** `scripts/test-connection.sh` runs the server's own client against your cluster before you connect a client.
 - **Small enough to read.** One Python module on the official Kubernetes client, with no database, no daemon and no state. [ARCHITECTURE.md](docs/ARCHITECTURE.md) maps every tool to its API call and the RBAC it needs.
@@ -72,6 +73,8 @@
 | 👀 | `describe_pod` | A pod's conditions, container states, restarts, last exit code and reason, resources and recent events (no environment variables) |
 | 👀 | `get_resource_usage` | CPU and memory for pods or nodes from metrics-server, nodes as a percent of allocatable |
 | 👀 | `get_cluster_info` | Version, nodes and namespaces at a glance |
+| 🏗️ | `list_distributions` · `cluster_status` | Distributions it can build and their K3s versions; a cluster's nodes and Ready state without switching to it |
+| 🏗️ | `plan_cluster` · `create_cluster` | Check nodes over SSH, then build a K3s cluster and write its admin and scoped kubeconfigs. **Opt-in** with `K3S_PROVISIONING=true` |
 | 🔀 | `list_clusters` · `use_cluster` | The clusters in your kubeconfig folder and which is active; switch to another without a restart. Admin kubeconfigs (`*-admin.yaml`) are never offered. |
 | 👀 | `get_resource` | Any kind, including custom resources (K3s `HelmChart`s, Traefik `IngressRoute`s, cert-manager `Certificate`s): list with Ready status, or one whole object. Secrets are refused. |
 | 👀 | `rollout_status` | Whether a Deployment, StatefulSet or DaemonSet has finished rolling out; can wait for it |
@@ -94,6 +97,7 @@ There's **no read-only switch**. The server can do whatever the **kubeconfig** i
 - **Read** across the cluster (the built-in **`view`** role, plus nodes). It can't read Secrets.
 - **Write** only in the namespaces you give an **`edit`** RoleBinding. The file binds `default`; change it, copy the block for more namespaces, or delete it for read-only. Writes anywhere else fail with `403 Forbidden` at the API server.
 - **Custom resources** only if their CRD opts in. `view` and `edit` include a custom resource only when its ClusterRoles aggregate into them, and many CRDs, Traefik's among them, don't. Grant those kinds with your own Role if you want the server to manage them.
+- **Building clusters** is off by default. `plan_cluster` and `create_cluster` run commands as root over SSH with your key, which RBAC can't limit, so they only appear with `K3S_PROVISIONING=true`. See [PROVISIONING.md](docs/PROVISIONING.md).
 - **Nodes** stay read-only. `cordon_node` and `uncordon_node` need [`deploy/rbac-node-ops.yaml`](deploy/rbac-node-ops.yaml), an opt-in extra that lets the server patch nodes cluster-wide.
 
 Apply it with your admin kubeconfig, then build a kubeconfig for the server from the service account's token:
@@ -162,11 +166,21 @@ claude mcp add k3s --scope user -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" \
 
 [CLIENTS.md](docs/CLIENTS.md) covers other clients and running several clusters side by side.
 
+**To build clusters too,** add `K3S_PROVISIONING=true`. It's off by default because `plan_cluster` and `create_cluster` run root commands over SSH with your key, which no kubeconfig's RBAC can limit:
+
+```bash
+claude mcp add k3s --scope user -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" -e K3S_PROVISIONING=true \
+  -- uv --directory "$PWD" run k3s-mcp-server
+```
+
+The server tells your client on connect whether cluster building is on, so if you ask for a cluster while it's off, Claude explains how to turn it on instead of trying another way. [PROVISIONING.md](docs/PROVISIONING.md) has the full workflow with proxmox-mcp-server.
+
 | Variable | Default | What it does |
 |---|---|---|
 | `KUBECONFIG` | `~/.kube/config` | The kubeconfig to use; its current context and RBAC decide what the server can reach. Point it at the scoped kubeconfig from [Safety](#safety), not your admin one. |
 | `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools act when a call doesn't name a namespace. List tools search all namespaces instead. |
-| `K3S_KUBECONFIG_DIR` | `~/.kube/clusters` | A folder of kubeconfigs that `use_cluster` switches between. Files ending in `-admin.yaml` are skipped. |
+| `K3S_KUBECONFIG_DIR` | `~/.kube/clusters` | A folder of kubeconfigs that `use_cluster` switches between, and where `create_cluster` writes new ones. Files ending in `-admin.yaml` are skipped. |
+| `K3S_PROVISIONING` | `false` | `true` adds `plan_cluster` and `create_cluster`, which run commands over SSH with your key. See [PROVISIONING.md](docs/PROVISIONING.md). |
 | `K3S_DEBUG` | `false` | Extra startup logging to stderr |
 
 <a id="guides"></a>
@@ -177,6 +191,7 @@ claude mcp add k3s --scope user -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" \
 |---|---|
 | [QUICKSTART.md](docs/QUICKSTART.md) | From clone to a working client, with least-privilege access and a checklist |
 | [CLIENTS.md](docs/CLIENTS.md) | Claude Code, Claude Desktop, several clusters, settings, troubleshooting |
+| [PROVISIONING.md](docs/PROVISIONING.md) | Building a K3s cluster with proxmox-mcp-server: what nodes need, what gets written, how secrets stay out |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How a call flows, namespace rules, every tool's API call and RBAC, known limits |
 | [deploy/rbac.yaml](deploy/rbac.yaml) | The service account, roles and bindings |
 | [deploy/rbac-node-ops.yaml](deploy/rbac-node-ops.yaml) | Optional: lets the server cordon and uncordon nodes |
@@ -222,6 +237,7 @@ Use absolute paths, check the config is valid JSON, and quit Claude Desktop comp
 
 Planned, not built yet:
 
+- [ ] **More distributions.** RKE2 and kubeadm for `create_cluster`, then Talos; highly available control planes; a teardown tool.
 - [ ] **Tests and CI.** A pytest suite for the server's logic (rollout rules, kind lookup, apply results, the Secrets refusal) and a workflow that runs lint and tests on every pull request.
 - [ ] **Follow logs.** Stream new lines from a pod instead of returning the last *N*.
 - [ ] **Drain nodes.** Evict a node's pods after `cordon_node`, respecting PodDisruptionBudgets.
@@ -231,8 +247,9 @@ Planned, not built yet:
 ## 🧱 Project layout
 
 ```
-src/k3s_mcp_server/server.py   the server that gets packaged and installed (32 tools)
-docs/                          QUICKSTART, CLIENTS and ARCHITECTURE guides, and the animations on this page
+src/k3s_mcp_server/server.py   the server that gets packaged and installed (36 tools)
+src/k3s_mcp_server/provision.py   cluster building over SSH: plan_cluster, create_cluster
+docs/                          QUICKSTART, CLIENTS, PROVISIONING and ARCHITECTURE guides, and the animations on this page
 scripts/                       setup.sh and test-connection.sh
 deploy/rbac.yaml               a least-privilege service account for the server
 deploy/rbac-node-ops.yaml      optional: node cordon and uncordon

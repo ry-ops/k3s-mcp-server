@@ -13,10 +13,11 @@ Configuration via environment variables:
     K3S_KUBECONFIG_DIR: Folder of kubeconfigs that use_cluster switches between (default: ~/.kube/clusters)
     K3S_DEFAULT_NAMESPACE: Default namespace for operations (default: default)
     K3S_DEBUG: Enable debug logging (default: false)
+    K3S_PROVISIONING: Enable plan_cluster and create_cluster, which run commands over SSH (default: false)
 
 Author: ry-ops
 License: MIT
-Version: 1.5.0
+Version: 1.6.0
 """
 
 import os
@@ -40,7 +41,7 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent
 import mcp.server.stdio
 
-from k3s_mcp_server import __version__
+from k3s_mcp_server import __version__, provision
 
 
 # Configuration
@@ -49,6 +50,9 @@ KUBECONFIG_DIR = os.path.expanduser(
     os.getenv("K3S_KUBECONFIG_DIR", str(Path.home() / ".kube" / "clusters")))
 DEFAULT_NAMESPACE = os.getenv("K3S_DEFAULT_NAMESPACE", "default")
 DEBUG = os.getenv("K3S_DEBUG", "false").lower() == "true"
+# Building clusters runs root commands over SSH with the user's key, outside any
+# kubeconfig's RBAC, so those tools are opt-in
+PROVISIONING = os.getenv("K3S_PROVISIONING", "false").lower() == "true"
 
 # Field manager name recorded on objects changed by server-side apply
 FIELD_MANAGER = "k3s-mcp-server"
@@ -1443,8 +1447,36 @@ class K3sClient:
 # Initialize K3s client
 k3s = K3sClient()
 
+# What the client is told on connect, so a model asked to build a cluster knows
+# whether it can and why not
+PROVISIONING_TOOLS_NAMES = ["plan_cluster", "create_cluster"]
+if PROVISIONING:
+    PROVISIONING_STATUS = (
+        "Cluster building is ON (K3S_PROVISIONING=true). plan_cluster and create_cluster run root "
+        "commands over SSH with the user's key; no kubeconfig's RBAC limits them. Always run "
+        "plan_cluster first and show its steps and blockers before calling create_cluster."
+    )
+else:
+    PROVISIONING_STATUS = (
+        "Cluster building is OFF: plan_cluster and create_cluster are not available because "
+        "K3S_PROVISIONING is not set to true. They run root commands over SSH with the user's key, "
+        "which no kubeconfig's RBAC can limit, so they are opt-in. If the user asks to build a "
+        "cluster, tell them this and that enabling it means adding K3S_PROVISIONING=true to this "
+        "server's environment and restarting their MCP client. Don't build one another way, such as "
+        "running installers through execute_command or a hypervisor's guest agent."
+    )
+INSTRUCTIONS = (
+    "k3s-mcp-server manages K3s clusters through the active kubeconfig. "
+    "That kubeconfig's RBAC decides what every cluster tool can do; a 403 means the identity isn't "
+    "allowed, not a bug. Secrets are never read. list_clusters and use_cluster switch between the "
+    "kubeconfigs in the cluster folder. " + PROVISIONING_STATUS
+)
+
 # Initialize MCP server
-app = Server("k3s-mcp-server", version=__version__)
+try:
+    app = Server("k3s-mcp-server", version=__version__, instructions=INSTRUCTIONS)
+except TypeError:  # mcp releases before server instructions
+    app = Server("k3s-mcp-server", version=__version__)
 
 
 # Define tools
@@ -1650,6 +1682,20 @@ TOOLS = [
         },
     ),
     Tool(
+        name="list_distributions",
+        description="List the Kubernetes distributions this server can build, with their status and, for K3s, the release channels and the three newest supported minor versions.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="cluster_status",
+        description="Nodes, Kubernetes version and Ready state of a cluster in the kubeconfig folder, without switching to it",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Cluster name from list_clusters"}},
+            "required": ["name"]
+        },
+    ),
+    Tool(
         name="get_nodes",
         description="List all nodes in the cluster with resource information",
         inputSchema={"type": "object", "properties": {}},
@@ -1838,10 +1884,42 @@ TOOLS = [
 ]
 
 
+_NODES_SCHEMA = {
+    "name": {"type": "string", "description": "Cluster name: lowercase letters, digits and '-', e.g. lab2"},
+    "nodes": {"type": "array", "items": {"type": "string"},
+              "description": "Node IPs or hostnames reachable over SSH; the first becomes the control-plane server, the rest join as agents"},
+    "distribution": {"type": "string", "enum": ["k3s"], "description": "Distribution (default k3s; see list_distributions)"},
+    "version": {"type": "string", "description": "K3s channel (stable, latest, v1.34) or exact version (v1.34.1+k3s1); default stable"},
+    "ssh_user": {"type": "string", "description": "SSH user with passwordless sudo (default ubuntu)"},
+    "ssh_key": {"type": "string", "description": "Private key path (default: your ssh config and agent)"},
+}
+
+PROVISIONING_TOOLS = [
+    Tool(
+        name="plan_cluster",
+        description="Dry run for create_cluster: checks each node over SSH (reachable, passwordless sudo, CPU and RAM, K3s not already installed, can download K3s) and lists the steps. Changes nothing.",
+        inputSchema={"type": "object", "properties": _NODES_SCHEMA, "required": ["name", "nodes"]},
+    ),
+    Tool(
+        name="create_cluster",
+        description="Build a cluster over SSH: K3s server on the first node, agents on the rest, wait until Ready, then write an admin kubeconfig and a scoped one (k3s-mcp service account) to the kubeconfig folder. Returns paths and a CA fingerprint, never tokens or kubeconfig contents. Run plan_cluster first.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                **_NODES_SCHEMA,
+                "edit_namespaces": {"type": "array", "items": {"type": "string"},
+                                    "description": "Namespaces where the scoped identity gets edit (default ['default'])"},
+            },
+            "required": ["name", "nodes"],
+        },
+    ),
+]
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available tools."""
-    return TOOLS
+    return TOOLS + PROVISIONING_TOOLS if PROVISIONING else TOOLS
 
 
 @app.call_tool()
@@ -1921,6 +1999,27 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await k3s.set_node_schedulable(
                 name=arguments["name"], schedulable=(name == "uncordon_node")
             )
+        elif name == "list_distributions":
+            result = await provision.list_distributions()
+            result["provisioning"] = {
+                "enabled": PROVISIONING,
+                "tools": PROVISIONING_TOOLS_NAMES,
+                "note": PROVISIONING_STATUS,
+            }
+        elif name == "cluster_status":
+            result = await provision.cluster_status(arguments["name"], KUBECONFIG_DIR)
+        elif name in ("plan_cluster", "create_cluster"):
+            if not PROVISIONING:
+                raise ValueError(
+                    f"{name} is disabled: K3S_PROVISIONING isn't set to true. It runs root commands over SSH "
+                    "with your key, which no kubeconfig's RBAC can limit, so it's opt-in. Add "
+                    "K3S_PROVISIONING=true to this server's environment and restart your MCP client.")
+            build = {k: arguments[k] for k in ("distribution", "version", "ssh_user", "ssh_key") if arguments.get(k)}
+            if name == "plan_cluster":
+                result = await provision.plan_cluster(arguments["name"], arguments["nodes"], KUBECONFIG_DIR, **build)
+            else:
+                result = await provision.create_cluster(arguments["name"], arguments["nodes"], KUBECONFIG_DIR,
+                                                        edit_namespaces=arguments.get("edit_namespaces"), **build)
         elif name == "list_clusters":
             result = await k3s.list_clusters()
         elif name == "use_cluster":
@@ -2001,7 +2100,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             # For structured data
             content = [TextContent(type="text", text=json.dumps(result, indent=2))]
         # With several clusters available, say which one answered
-        if k3s.multi_cluster() and name not in ("list_clusters", "use_cluster"):
+        if k3s.multi_cluster() and name not in ("list_clusters", "use_cluster", "list_distributions",
+                                                 "cluster_status", "plan_cluster", "create_cluster"):
             content.append(TextContent(type="text", text=f"cluster: {k3s.cluster_name}"))
         return content
 
