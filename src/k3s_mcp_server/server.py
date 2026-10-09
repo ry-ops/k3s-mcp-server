@@ -15,7 +15,7 @@ Configuration via environment variables:
 
 Author: ry-ops
 License: MIT
-Version: 1.1.0
+Version: 1.2.0
 """
 
 import os
@@ -29,6 +29,9 @@ import re
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream
+from kubernetes.utils import parse_quantity
+from kubernetes.dynamic import DynamicClient
+from kubernetes.dynamic.exceptions import NotFoundError, ResourceNotFoundError
 
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -41,6 +44,9 @@ from k3s_mcp_server import __version__
 KUBECONFIG = os.getenv("KUBECONFIG", str(Path.home() / ".kube" / "k3s-cortex-config.yaml"))
 DEFAULT_NAMESPACE = os.getenv("K3S_DEFAULT_NAMESPACE", "default")
 DEBUG = os.getenv("K3S_DEBUG", "false").lower() == "true"
+
+# Field manager name recorded on objects changed by server-side apply
+FIELD_MANAGER = "k3s-mcp-server"
 
 # Anchored regex for Kubernetes role label parsing
 _ROLE_LABEL_RE = re.compile(r'^node-role\.kubernetes\.io/(.+)$')
@@ -63,6 +69,8 @@ class K3sClient:
         self.apps_v1 = client.AppsV1Api()
         self.batch_v1 = client.BatchV1Api()
         self.networking_v1 = client.NetworkingV1Api()
+        self.custom_objects = client.CustomObjectsApi()
+        self._dynamic = None
 
         if DEBUG:
             print(f"K3s MCP Server initialized with kubeconfig: {self.kubeconfig_path}", file=sys.stderr)
@@ -338,7 +346,7 @@ class K3sClient:
             raise Exception(f"Failed to delete pod {name}: {e}")
 
     async def get_logs(self, pod_name: str, namespace: str, container: Optional[str] = None,
-                      tail_lines: int = 100, follow: bool = False) -> str:
+                      tail_lines: int = 100, previous: bool = False) -> str:
         """
         Get logs from a pod.
 
@@ -347,7 +355,7 @@ class K3sClient:
             namespace: Namespace
             container: Container name (optional, uses first container if not specified)
             tail_lines: Number of lines to tail
-            follow: Stream logs (not implemented for MCP)
+            previous: Return logs from the previous (crashed) container instance
 
         Returns:
             Pod logs as string
@@ -357,11 +365,212 @@ class K3sClient:
                 name=pod_name,
                 namespace=namespace,
                 container=container,
-                tail_lines=tail_lines
+                tail_lines=tail_lines,
+                previous=previous
             )
             return logs
         except ApiException as e:
             raise Exception(f"Failed to get logs for pod {pod_name}: {e}")
+
+    @staticmethod
+    def _format_event(event) -> Dict[str, Any]:
+        """Format an event for output."""
+        last_seen = event.last_timestamp or event.event_time or event.metadata.creation_timestamp
+        obj = event.involved_object
+        return {
+            "type": event.type,
+            "reason": event.reason,
+            "object": f"{obj.kind}/{obj.name}" if obj else None,
+            "namespace": event.metadata.namespace,
+            "message": event.message,
+            "count": event.count or 1,
+            "last_seen": last_seen.isoformat() if last_seen else None,
+        }
+
+    async def get_events(self, namespace: Optional[str] = None, name: Optional[str] = None,
+                         kind: Optional[str] = None, event_type: Optional[str] = None,
+                         limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        List events, newest first.
+
+        Args:
+            namespace: Namespace to filter events (None for all namespaces)
+            name: Only events about the object with this name
+            kind: Only events about objects of this kind (e.g., Pod, Deployment)
+            event_type: Only events of this type (Normal or Warning)
+            limit: Maximum number of events to return
+
+        Returns:
+            List of event information dictionaries
+        """
+        selectors = []
+        if name:
+            selectors.append(f"involvedObject.name={name}")
+        if kind:
+            selectors.append(f"involvedObject.kind={kind}")
+        if event_type:
+            selectors.append(f"type={event_type}")
+        field_selector = ",".join(selectors)
+
+        try:
+            if namespace:
+                events = self.core_v1.list_namespaced_event(
+                    namespace=namespace, field_selector=field_selector
+                )
+            else:
+                events = self.core_v1.list_event_for_all_namespaces(field_selector=field_selector)
+        except ApiException as e:
+            raise Exception(f"Failed to list events: {e}")
+
+        formatted = [self._format_event(ev) for ev in events.items]
+        formatted.sort(key=lambda ev: ev["last_seen"] or "", reverse=True)
+        return formatted[:limit]
+
+    @staticmethod
+    def _format_container_state(state) -> Optional[Dict[str, Any]]:
+        """Format a container state (waiting, running or terminated)."""
+        if state is None:
+            return None
+        if state.waiting:
+            return {"state": "waiting", "reason": state.waiting.reason,
+                    "message": state.waiting.message}
+        if state.running:
+            started = state.running.started_at
+            return {"state": "running", "started": started.isoformat() if started else None}
+        if state.terminated:
+            t = state.terminated
+            return {
+                "state": "terminated",
+                "reason": t.reason,
+                "exit_code": t.exit_code,
+                "message": t.message,
+                "finished": t.finished_at.isoformat() if t.finished_at else None,
+            }
+        return None
+
+    async def describe_pod(self, name: str, namespace: str) -> Dict[str, Any]:
+        """
+        Describe a pod: status, conditions, container states and recent events.
+
+        Environment variables are left out because they can hold credentials.
+
+        Args:
+            name: Pod name
+            namespace: Namespace
+
+        Returns:
+            Pod details dictionary
+        """
+        try:
+            pod = self.core_v1.read_namespaced_pod(name=name, namespace=namespace)
+        except ApiException as e:
+            raise Exception(f"Failed to get pod {name}: {e}")
+
+        specs = {c.name: c for c in (pod.spec.init_containers or []) + pod.spec.containers}
+        statuses = (pod.status.init_container_statuses or []) + (pod.status.container_statuses or [])
+        init_names = {c.name for c in pod.spec.init_containers or []}
+
+        containers = []
+        for cs in statuses:
+            spec = specs.get(cs.name)
+            resources = spec.resources if spec else None
+            containers.append({
+                "name": cs.name,
+                "init": cs.name in init_names,
+                "image": cs.image,
+                "ready": cs.ready,
+                "restart_count": cs.restart_count,
+                "state": self._format_container_state(cs.state),
+                "last_state": self._format_container_state(cs.last_state),
+                "requests": (resources.requests or {}) if resources else {},
+                "limits": (resources.limits or {}) if resources else {},
+            })
+
+        return {
+            "name": pod.metadata.name,
+            "namespace": pod.metadata.namespace,
+            "phase": pod.status.phase,
+            "reason": pod.status.reason,
+            "message": pod.status.message,
+            "node": pod.spec.node_name,
+            "pod_ip": pod.status.pod_ip,
+            "qos_class": pod.status.qos_class,
+            "owners": [f"{o.kind}/{o.name}" for o in pod.metadata.owner_references or []],
+            "labels": pod.metadata.labels or {},
+            "conditions": [
+                {"type": c.type, "status": c.status, "reason": c.reason, "message": c.message}
+                for c in pod.status.conditions or []
+            ],
+            "containers": containers,
+            "events": await self.get_events(namespace=namespace, name=name, kind="Pod", limit=20),
+        }
+
+    @staticmethod
+    def _format_usage(usage: Dict[str, str]) -> Dict[str, Any]:
+        """Convert metrics-server quantities to millicores and MiB."""
+        return {
+            "cpu_millicores": round(parse_quantity(usage.get("cpu", "0")) * 1000),
+            "memory_mib": round(parse_quantity(usage.get("memory", "0")) / 2**20),
+        }
+
+    async def get_resource_usage(self, kind: str = "pods",
+                                 namespace: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get current CPU and memory usage from metrics-server.
+
+        Args:
+            kind: "pods" or "nodes"
+            namespace: Namespace to filter pods (None for all namespaces; ignored for nodes)
+
+        Returns:
+            List of usage dictionaries
+        """
+        group, version = "metrics.k8s.io", "v1beta1"
+        try:
+            if kind == "nodes":
+                items = self.custom_objects.list_cluster_custom_object(group, version, "nodes")
+                allocatable = {
+                    n.metadata.name: self._format_usage(n.status.allocatable or {})
+                    for n in self.core_v1.list_node().items
+                }
+                nodes = []
+                for i in items.get("items", []):
+                    name = i["metadata"]["name"]
+                    usage = self._format_usage(i.get("usage", {}))
+                    alloc = allocatable.get(name)
+                    if alloc:
+                        usage["cpu_percent"] = round(
+                            100 * usage["cpu_millicores"] / alloc["cpu_millicores"]
+                        ) if alloc["cpu_millicores"] else None
+                        usage["memory_percent"] = round(
+                            100 * usage["memory_mib"] / alloc["memory_mib"]
+                        ) if alloc["memory_mib"] else None
+                    nodes.append({"name": name, **usage})
+                return nodes
+            if kind != "pods":
+                raise ValueError(f"kind must be 'pods' or 'nodes', not {kind!r}")
+            if namespace:
+                items = self.custom_objects.list_namespaced_custom_object(
+                    group, version, namespace, "pods"
+                )
+            else:
+                items = self.custom_objects.list_cluster_custom_object(group, version, "pods")
+        except ApiException as e:
+            if e.status == 404:
+                raise Exception("Metrics API not available: is metrics-server installed?")
+            raise Exception(f"Failed to get resource usage: {e}")
+
+        return [
+            {
+                "name": i["metadata"]["name"],
+                "namespace": i["metadata"]["namespace"],
+                "containers": [
+                    {"name": c["name"], **self._format_usage(c.get("usage", {}))}
+                    for c in i.get("containers", [])
+                ],
+            }
+            for i in items.get("items", [])
+        ]
 
     async def execute_command(self, pod_name: str, namespace: str, command: List[str],
                              container: Optional[str] = None) -> str:
@@ -393,60 +602,113 @@ class K3sClient:
         except ApiException as e:
             raise Exception(f"Failed to execute command in pod {pod_name}: {e}")
 
-    async def apply_manifest(self, manifest_yaml: str, namespace: Optional[str] = None) -> Dict[str, Any]:
+    @property
+    def dynamic(self) -> DynamicClient:
+        """Dynamic client for any kind, created on first use (it runs API discovery)."""
+        if self._dynamic is None:
+            self._dynamic = DynamicClient(client.ApiClient())
+        return self._dynamic
+
+    @staticmethod
+    def _api_error_message(e: ApiException) -> str:
+        """Pull the API server's message out of an ApiException."""
+        try:
+            return json.loads(e.body)["message"]
+        except (TypeError, ValueError, KeyError):
+            return f"{e.status} {e.reason}"
+
+    async def apply_manifest(self, manifest_yaml: str, namespace: Optional[str] = None,
+                             dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
         """
-        Apply a Kubernetes manifest.
+        Apply a Kubernetes manifest with server-side apply, like `kubectl apply --server-side`.
+
+        Creates objects that don't exist and updates ones that do. Accepts several
+        YAML documents separated by `---`, List kinds, and any kind the cluster
+        knows, including custom resources. Each document is applied on its own,
+        so one failure doesn't stop the rest.
 
         Args:
-            manifest_yaml: YAML manifest content
-            namespace: Namespace override (optional)
+            manifest_yaml: YAML manifest content (one or more documents)
+            namespace: Namespace for namespaced objects; overrides metadata.namespace
+            dry_run: Validate on the server without saving anything
+            force: Take ownership of fields another manager owns (resolves conflicts)
 
         Returns:
-            Applied resource information
+            Per-document results
         """
         try:
-            # Parse YAML
-            manifest = yaml.safe_load(manifest_yaml)
-
-            # Determine resource type and apply
-            kind = manifest.get("kind")
-            api_version = manifest.get("apiVersion")
-            metadata = manifest.get("metadata", {})
-            resource_namespace = namespace or metadata.get("namespace", DEFAULT_NAMESPACE)
-
-            # Add namespace to metadata if not present
-            if "namespace" not in metadata and kind not in ["Namespace", "Node", "PersistentVolume", "ClusterRole", "ClusterRoleBinding"]:
-                manifest["metadata"]["namespace"] = resource_namespace
-
-            # Apply based on kind
-            if kind == "Pod":
-                result = self.core_v1.create_namespaced_pod(
-                    namespace=resource_namespace,
-                    body=manifest
-                )
-            elif kind == "Deployment":
-                result = self.apps_v1.create_namespaced_deployment(
-                    namespace=resource_namespace,
-                    body=manifest
-                )
-            elif kind == "Service":
-                result = self.core_v1.create_namespaced_service(
-                    namespace=resource_namespace,
-                    body=manifest
-                )
-            else:
-                raise Exception(f"Unsupported resource kind: {kind}")
-
-            return {
-                "kind": kind,
-                "name": result.metadata.name,
-                "namespace": result.metadata.namespace if hasattr(result.metadata, 'namespace') else None,
-                "status": "Created successfully"
-            }
+            docs = [d for d in yaml.safe_load_all(manifest_yaml) if d]
         except yaml.YAMLError as e:
             raise Exception(f"Failed to parse YAML manifest: {e}")
-        except ApiException as e:
-            raise Exception(f"Failed to apply manifest: {e}")
+
+        objects = []
+        for doc in docs:
+            if not isinstance(doc, dict):
+                raise Exception("Each YAML document must be a mapping")
+            if doc.get("kind", "").endswith("List") and isinstance(doc.get("items"), list):
+                objects.extend(doc["items"])
+            else:
+                objects.append(doc)
+        if not objects:
+            raise Exception("Manifest contains no objects")
+
+        results = []
+        for obj in objects:
+            kind = obj.get("kind")
+            api_version = obj.get("apiVersion")
+            metadata = obj.setdefault("metadata", {})
+            name = metadata.get("name")
+            entry: Dict[str, Any] = {"kind": kind, "name": name}
+
+            try:
+                if not kind or not api_version:
+                    raise ValueError("apiVersion and kind are required")
+                if not name:
+                    raise ValueError("metadata.name is required (generateName isn't supported)")
+
+                resource = self.dynamic.resources.get(api_version=api_version, kind=kind)
+                obj_namespace = None
+                if resource.namespaced:
+                    obj_namespace = namespace or metadata.get("namespace") or DEFAULT_NAMESPACE
+                    metadata["namespace"] = obj_namespace
+                    entry["namespace"] = obj_namespace
+
+                try:
+                    before = resource.get(name=name, namespace=obj_namespace).to_dict()
+                except NotFoundError:
+                    before = None
+
+                applied = resource.server_side_apply(
+                    body=obj,
+                    name=name,
+                    namespace=obj_namespace,
+                    field_manager=FIELD_MANAGER,
+                    force_conflicts=force or None,
+                    dry_run="All" if dry_run else None,
+                )
+
+                # A no-op apply returns the stored object untouched, dry run or not
+                if before is None:
+                    entry["action"] = "created"
+                elif applied.to_dict() == before:
+                    entry["action"] = "unchanged"
+                else:
+                    entry["action"] = "configured"
+            except ResourceNotFoundError:
+                entry["error"] = f"The cluster has no kind {kind} in {api_version}"
+            except ApiException as e:
+                entry["error"] = self._api_error_message(e)
+            except ValueError as e:
+                entry["error"] = str(e)
+            results.append(entry)
+
+        failed = sum(1 for r in results if "error" in r)
+        return {
+            "dry_run": dry_run,
+            "applied": len(results) - failed,
+            "failed": failed,
+            "results": results,
+        }
 
     async def delete_resource(self, kind: str, name: str, namespace: str) -> Dict[str, Any]:
         """
@@ -640,9 +902,50 @@ TOOLS = [
                 "pod_name": {"type": "string", "description": "Pod name"},
                 "namespace": {"type": "string", "description": "Namespace (default: default)"},
                 "container": {"type": "string", "description": "Container name (optional)"},
-                "tail_lines": {"type": "integer", "description": "Number of lines to tail (default: 100)"}
+                "tail_lines": {"type": "integer", "description": "Number of lines to tail (default: 100)"},
+                "previous": {
+                    "type": "boolean",
+                    "description": "Logs from the previous container instance, e.g. after a crash (default: false)"
+                }
             },
             "required": ["pod_name"]
+        },
+    ),
+    Tool(
+        name="get_events",
+        description="List cluster events, newest first. Filter by namespace, object name, kind, or type (Warning) to see why something is failing.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "namespace": {"type": "string", "description": "Namespace to filter events (omit for all namespaces)"},
+                "name": {"type": "string", "description": "Only events about the object with this name"},
+                "kind": {"type": "string", "description": "Only events about this kind, e.g. Pod or Deployment"},
+                "type": {"type": "string", "enum": ["Normal", "Warning"], "description": "Only events of this type"},
+                "limit": {"type": "integer", "description": "Maximum number of events (default: 50)"}
+            }
+        },
+    ),
+    Tool(
+        name="describe_pod",
+        description="Describe a pod: phase, conditions, each container's state, restarts, last termination reason and exit code, resources, and recent events. Environment variables are not included.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Pod name"},
+                "namespace": {"type": "string", "description": "Namespace (default: default)"}
+            },
+            "required": ["name"]
+        },
+    ),
+    Tool(
+        name="get_resource_usage",
+        description="Current CPU (millicores) and memory (MiB) usage for pods or nodes, from metrics-server (bundled with K3s). Nodes include percent of allocatable.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["pods", "nodes"], "description": "pods or nodes (default: pods)"},
+                "namespace": {"type": "string", "description": "Namespace to filter pods (omit for all namespaces)"}
+            }
         },
     ),
     Tool(
@@ -665,12 +968,14 @@ TOOLS = [
     ),
     Tool(
         name="apply_manifest",
-        description="Apply a Kubernetes YAML manifest to create or update resources",
+        description="Apply a Kubernetes YAML manifest with server-side apply: creates objects or updates existing ones. Accepts several documents separated by ---, and any kind the cluster knows, including custom resources.",
         inputSchema={
             "type": "object",
             "properties": {
-                "manifest_yaml": {"type": "string", "description": "YAML manifest content"},
-                "namespace": {"type": "string", "description": "Namespace override (optional)"}
+                "manifest_yaml": {"type": "string", "description": "YAML manifest content (one or more documents)"},
+                "namespace": {"type": "string", "description": "Namespace for namespaced objects; overrides metadata.namespace (optional)"},
+                "dry_run": {"type": "boolean", "description": "Validate on the server without saving anything (default: false)"},
+                "force": {"type": "boolean", "description": "Take over fields owned by another field manager to resolve apply conflicts (default: false)"}
             },
             "required": ["manifest_yaml"]
         },
@@ -757,7 +1062,26 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 pod_name=arguments["pod_name"],
                 namespace=arguments.get("namespace", DEFAULT_NAMESPACE),
                 container=arguments.get("container"),
-                tail_lines=arguments.get("tail_lines", 100)
+                tail_lines=arguments.get("tail_lines", 100),
+                previous=arguments.get("previous", False)
+            )
+        elif name == "get_events":
+            result = await k3s.get_events(
+                namespace=arguments.get("namespace"),
+                name=arguments.get("name"),
+                kind=arguments.get("kind"),
+                event_type=arguments.get("type"),
+                limit=arguments.get("limit", 50)
+            )
+        elif name == "describe_pod":
+            result = await k3s.describe_pod(
+                name=arguments["name"],
+                namespace=arguments.get("namespace", DEFAULT_NAMESPACE)
+            )
+        elif name == "get_resource_usage":
+            result = await k3s.get_resource_usage(
+                kind=arguments.get("kind", "pods"),
+                namespace=arguments.get("namespace")
             )
         elif name == "execute_command":
             result = await k3s.execute_command(
@@ -769,7 +1093,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "apply_manifest":
             result = await k3s.apply_manifest(
                 manifest_yaml=arguments["manifest_yaml"],
-                namespace=arguments.get("namespace")
+                namespace=arguments.get("namespace"),
+                dry_run=arguments.get("dry_run", False),
+                force=arguments.get("force", False)
             )
         elif name == "delete_resource":
             result = await k3s.delete_resource(

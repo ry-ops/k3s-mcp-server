@@ -22,9 +22,9 @@ flowchart LR
 
 | Piece | What it does |
 |---|---|
-| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 13 tool definitions with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
+| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 16 tool definitions with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
 | **Tool router** | One `call_tool` function: fills in the default namespace, calls the matching `K3sClient` method, and formats the result. |
-| **`K3sClient`** | Loads the kubeconfig once and holds the API clients. The tools use `CoreV1Api` and `AppsV1Api`; batch and networking clients are created but unused. Each method is a thin wrapper over one or two API calls that trims the response down to the fields worth reading. |
+| **`K3sClient`** | Loads the kubeconfig once and holds the API clients. The tools use `CoreV1Api`, `AppsV1Api`, `CustomObjectsApi` for metrics, and a `DynamicClient` for `apply_manifest`, which is created on first use because it runs API discovery. Batch and networking clients are created but unused. Each method is a thin wrapper over one or two API calls that trims the response down to the fields worth reading. |
 | **Kubernetes API** | Does all the real work, including authentication and authorization. The server never checks permissions itself. |
 
 ## Startup
@@ -54,14 +54,15 @@ sequenceDiagram
 
 ### Namespaces
 
-- **List tools** (`get_pods`, `get_deployments`, `get_services`): no namespace means **all namespaces** (`list_*_for_all_namespaces`).
+- **List tools** (`get_pods`, `get_deployments`, `get_services`, `get_events`, `get_resource_usage`): no namespace means **all namespaces** (`list_*_for_all_namespaces`).
 - **Single-object tools**: no namespace means `K3S_DEFAULT_NAMESPACE` (default `default`).
-- **`apply_manifest`**: uses the `namespace` argument, then the manifest's own `metadata.namespace`, then `K3S_DEFAULT_NAMESPACE`.
+- **`apply_manifest`**: for namespaced kinds, uses the `namespace` argument, then the manifest's own `metadata.namespace`, then `K3S_DEFAULT_NAMESPACE`. Cluster-scoped kinds get no namespace.
 
 ### Results and errors
 
 - Structured results are returned as pretty-printed JSON in a single `TextContent`. Logs and command output come back as plain text.
-- Any exception, whether an API error, unsupported kind or bad YAML, is caught and returned as text: `Error executing <tool>: <message>`, with the HTTP status (for example `(403) Reason: Forbidden`). The call doesn't set the MCP `isError` flag, so clients see errors as ordinary text.
+- `apply_manifest` reports each document separately: `created`, `configured`, `unchanged`, or the API server's error message. One failing document doesn't stop the rest.
+- Any other exception, whether an API error, unsupported kind or bad YAML, is caught and returned as text: `Error executing <tool>: <message>`, with the HTTP status (for example `(403) Reason: Forbidden`). The call doesn't set the MCP `isError` flag, so clients see errors as ordinary text.
 
 ## Tools and the API calls behind them
 
@@ -73,12 +74,15 @@ sequenceDiagram
 | `get_services` | `list_namespaced_service` / `list_service_for_all_namespaces` | `list services` |
 | `get_nodes` | `list_node` | `list nodes` (cluster-scoped; the built-in `view` role doesn't include it) |
 | `get_namespaces` | `list_namespace` | `list namespaces` |
-| `get_logs` | `read_namespaced_pod_log` with `tail_lines` (default 100) | `get pods/log` |
+| `get_logs` | `read_namespaced_pod_log` with `tail_lines` (default 100) and optional `previous` | `get pods/log` |
+| `get_events` | `list_namespaced_event` / `list_event_for_all_namespaces`, with field selectors for object name, kind and type; sorted newest first | `list events` |
+| `describe_pod` | `read_namespaced_pod` + `list_namespaced_event` for that pod. Environment variables are left out because they can hold credentials. | `get pods`, `list events` |
+| `get_resource_usage` | `metrics.k8s.io/v1beta1` pods or nodes through `CustomObjectsApi`, plus `list_node` for node allocatable | `list pods.metrics.k8s.io` or `nodes.metrics.k8s.io` (metrics-server aggregates these into `view`), and `list nodes` |
 | `get_cluster_info` | `VersionApi.get_code` + `list_node` + `list_namespace` | `list nodes`, `list namespaces` |
 | `scale_deployment` | `patch_namespaced_deployment_scale` | `patch deployments.apps/scale` |
 | `restart_pod` | `delete_namespaced_pod`; the owning controller re-creates it | `delete pods` |
 | `execute_command` | `connect_get_namespaced_pod_exec` over a WebSocket stream, no TTY or stdin | `create pods/exec` |
-| `apply_manifest` | `create_namespaced_{pod,deployment,service}` | `create` on that kind |
+| `apply_manifest` | Per document: discovery for the kind, `get`, then a server-side apply `PATCH` (`application/apply-patch+yaml`, field manager `k3s-mcp-server`, optional `dryRun=All` and `force`) | `get` and `patch` on that kind (apply creates through `patch`) |
 | `delete_resource` | `delete_namespaced_{pod,deployment,service}` | `delete` on that kind |
 
 [`deploy/rbac.yaml`](../deploy/rbac.yaml) grants all of the read rows cluster-wide (`view` plus a node-reader role) and the write rows only in namespaces bound to `edit`.
@@ -95,9 +99,10 @@ The server holds no secrets of its own and adds no permission checks. **The kube
 
 These are properties of the current code, not of Kubernetes:
 
-- **`apply_manifest` creates; it doesn't apply.** There's no server-side apply or patch, so an existing name returns `409 Conflict`. It takes one object per call: multi-document YAML (`---`) fails to parse.
-- **Three kinds.** `apply_manifest` and `delete_resource` handle Pod, Deployment and Service only.
-- **No events, metrics or log following.**
+- **`apply_manifest` needs a name.** Server-side apply addresses objects by name, so `generateName` isn't supported.
+- **Three kinds for deletes.** `delete_resource` handles Pod, Deployment and Service only, though `apply_manifest` takes any kind.
+- **No log following.** `get_logs` returns the last *N* lines.
+- **Usage needs metrics-server.** K3s bundles it; on other clusters `get_resource_usage` returns *Metrics API not available* until it's installed.
 - **Blocking calls.** The Kubernetes client is synchronous and is called directly from async handlers, so one slow API call holds up the next. That's fine for one client issuing one call at a time, which is how MCP clients use it.
 - **Errors aren't flagged.** Failures come back as normal text, not with `isError: true`.
 

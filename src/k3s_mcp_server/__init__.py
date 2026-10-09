@@ -11,7 +11,7 @@ Author: ry-ops
 License: MIT
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __author__ = "ry-ops"
 __license__ = "MIT"
 __url__ = "https://github.com/ry-ops/k3s-mcp-server"
