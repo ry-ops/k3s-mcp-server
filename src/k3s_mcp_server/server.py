@@ -9,13 +9,14 @@ GitHub: https://github.com/ry-ops/k3s-mcp-server
 Documentation: https://github.com/ry-ops/k3s-mcp-server#readme
 
 Configuration via environment variables:
-    KUBECONFIG: Path to kubeconfig file (default: ~/.kube/config)
+    KUBECONFIG: Path to kubeconfig file (default: ~/.kube/config); the cluster active at startup
+    K3S_KUBECONFIG_DIR: Folder of kubeconfigs that use_cluster switches between (default: ~/.kube/clusters)
     K3S_DEFAULT_NAMESPACE: Default namespace for operations (default: default)
     K3S_DEBUG: Enable debug logging (default: false)
 
 Author: ry-ops
 License: MIT
-Version: 1.4.1
+Version: 1.5.0
 """
 
 import os
@@ -44,6 +45,8 @@ from k3s_mcp_server import __version__
 
 # Configuration
 KUBECONFIG = os.getenv("KUBECONFIG", str(Path.home() / ".kube" / "config"))
+KUBECONFIG_DIR = os.path.expanduser(
+    os.getenv("K3S_KUBECONFIG_DIR", str(Path.home() / ".kube" / "clusters")))
 DEFAULT_NAMESPACE = os.getenv("K3S_DEFAULT_NAMESPACE", "default")
 DEBUG = os.getenv("K3S_DEBUG", "false").lower() == "true"
 
@@ -62,37 +65,137 @@ class K3sClient:
     """
 
     def __init__(self):
-        """Initialize the Kubernetes client."""
+        """Initialize the Kubernetes client for the startup cluster."""
         self.kubeconfig_path = KUBECONFIG
+        self.cluster_name = self._startup_name()
         self._load_config()
-
-        # Initialize API clients
-        self.core_v1 = client.CoreV1Api()
-        self.apps_v1 = client.AppsV1Api()
-        self.batch_v1 = client.BatchV1Api()
-        self.networking_v1 = client.NetworkingV1Api()
-        self.custom_objects = client.CustomObjectsApi()
-        self._dynamic = None
 
         if DEBUG:
             print(f"K3s MCP Server initialized with kubeconfig: {self.kubeconfig_path}", file=sys.stderr)
 
     def _load_config(self):
-        """Load kubeconfig from file or environment."""
+        """Load the startup kubeconfig, or exit with a message."""
         try:
-            # Check if kubeconfig file exists
             if not os.path.exists(self.kubeconfig_path):
                 print(f"Error: Kubeconfig not found at {self.kubeconfig_path}", file=sys.stderr)
                 print("Set KUBECONFIG environment variable to the correct path", file=sys.stderr)
                 sys.exit(1)
 
-            # Load kubeconfig
-            config.load_kube_config(config_file=self.kubeconfig_path)
+            self._connect(config.new_client_from_config(config_file=self.kubeconfig_path))
             print(f"Loaded kubeconfig from: {self.kubeconfig_path}", file=sys.stderr)
 
         except Exception as e:
             print(f"Error loading kubeconfig: {e}", file=sys.stderr)
             sys.exit(1)
+
+    def _connect(self, api_client) -> None:
+        """Point every API client at one cluster's ApiClient."""
+        self.api_client = api_client
+        self.core_v1 = client.CoreV1Api(api_client)
+        self.apps_v1 = client.AppsV1Api(api_client)
+        self.batch_v1 = client.BatchV1Api(api_client)
+        self.networking_v1 = client.NetworkingV1Api(api_client)
+        self.custom_objects = client.CustomObjectsApi(api_client)
+        self._dynamic = None
+
+    # Clusters ---------------------------------------------------------------
+
+    @staticmethod
+    def _startup_name() -> str:
+        """Name for the KUBECONFIG cluster: its file name without the extension."""
+        return os.path.splitext(os.path.basename(KUBECONFIG))[0] or "startup"
+
+    @staticmethod
+    def _folder_clusters() -> Dict[str, str]:
+        """Kubeconfigs in K3S_KUBECONFIG_DIR, by name. Admin kubeconfigs are skipped
+        so switching clusters can never swap a scoped identity for an admin one."""
+        found: Dict[str, str] = {}
+        if not os.path.isdir(KUBECONFIG_DIR):
+            return found
+        for entry in sorted(os.listdir(KUBECONFIG_DIR)):
+            name, ext = os.path.splitext(entry)
+            if ext in (".yaml", ".yml") and not name.endswith("-admin"):
+                found[name] = os.path.join(KUBECONFIG_DIR, entry)
+        return found
+
+    def _all_clusters(self) -> Dict[str, str]:
+        """The folder's clusters plus the startup KUBECONFIG, by name."""
+        clusters = self._folder_clusters()
+        startup = os.path.realpath(KUBECONFIG)
+        if not any(os.path.realpath(p) == startup for p in clusters.values()):
+            name = self._startup_name()
+            clusters = {(name if name not in clusters else "startup"): KUBECONFIG, **clusters}
+        return clusters
+
+    def multi_cluster(self) -> bool:
+        """True when more than one cluster is available, so results should name theirs."""
+        return len(self._all_clusters()) > 1
+
+    @staticmethod
+    def _describe_kubeconfig(path: str) -> Dict[str, Any]:
+        """Server and namespace of a kubeconfig's current context. No credentials."""
+        try:
+            with open(path) as f:
+                kc = yaml.safe_load(f) or {}
+            current = kc.get("current-context")
+            ctx = next((c.get("context", {}) for c in kc.get("contexts") or []
+                        if c.get("name") == current), {})
+            cluster = next((c.get("cluster", {}) for c in kc.get("clusters") or []
+                            if c.get("name") == ctx.get("cluster")), {})
+            info: Dict[str, Any] = {"server": cluster.get("server"),
+                                    "namespace": ctx.get("namespace")}
+        except (OSError, yaml.YAMLError) as e:
+            return {"error": f"Can't read kubeconfig: {e}"}
+        if os.stat(path).st_mode & 0o077:
+            info["warning"] = "File is readable by other users; chmod 600 it"
+        return info
+
+    async def list_clusters(self) -> Dict[str, Any]:
+        """List the clusters use_cluster can switch to, and which one is active."""
+        active = os.path.realpath(self.kubeconfig_path)
+        startup = os.path.realpath(KUBECONFIG)
+        return {
+            "folder": KUBECONFIG_DIR,
+            "active": self.cluster_name,
+            "clusters": [
+                {
+                    "name": name,
+                    "active": os.path.realpath(path) == active,
+                    "startup": os.path.realpath(path) == startup,
+                    **self._describe_kubeconfig(path),
+                }
+                for name, path in self._all_clusters().items()
+            ],
+        }
+
+    async def use_cluster(self, name: str) -> Dict[str, Any]:
+        """
+        Switch every later call to another cluster, without a restart.
+
+        Connects and checks the API server first; if that fails, the current
+        cluster stays active.
+        """
+        clusters = self._all_clusters()
+        path = clusters.get(name)
+        if path is None:
+            raise Exception(f"No cluster named {name!r}; available: {', '.join(clusters) or 'none'}")
+        try:
+            api_client = config.new_client_from_config(config_file=path)
+            version = client.VersionApi(api_client).get_code()
+        except Exception as e:
+            raise Exception(f"Couldn't connect to {name}, so {self.cluster_name} stays active: {e}")
+
+        previous = self.cluster_name
+        self._connect(api_client)
+        self.kubeconfig_path = path
+        self.cluster_name = name
+        return {
+            "active": name,
+            "previous": previous,
+            "server": self._describe_kubeconfig(path).get("server"),
+            "version": version.git_version,
+            "status": f"Switched from {previous} to {name}; later calls go to {name}",
+        }
 
     def _format_pod_info(self, pod) -> Dict[str, Any]:
         """Format pod information for display."""
@@ -1037,7 +1140,7 @@ class K3sClient:
     def dynamic(self) -> DynamicClient:
         """Dynamic client for any kind, created on first use (it runs API discovery)."""
         if self._dynamic is None:
-            self._dynamic = DynamicClient(client.ApiClient())
+            self._dynamic = DynamicClient(self.api_client)
         return self._dynamic
 
     @staticmethod
@@ -1309,7 +1412,7 @@ class K3sClient:
         """
         try:
             # Get version
-            version = client.VersionApi().get_code()
+            version = client.VersionApi(self.api_client).get_code()
 
             # Get nodes summary
             nodes = await self.get_nodes()
@@ -1529,6 +1632,20 @@ TOOLS = [
                 "name": {"type": "string", "description": "Deployment name"},
                 "namespace": {"type": "string", "description": "Namespace (default: default)"}
             },
+            "required": ["name"]
+        },
+    ),
+    Tool(
+        name="list_clusters",
+        description="List the clusters this server can switch to (kubeconfigs in K3S_KUBECONFIG_DIR plus the startup KUBECONFIG), with each one's API server and which is active. Never returns credentials.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="use_cluster",
+        description="Switch every later call to another cluster from list_clusters, without a restart. Checks the connection first; on failure the current cluster stays active.",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Cluster name from list_clusters"}},
             "required": ["name"]
         },
     ),
@@ -1804,6 +1921,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await k3s.set_node_schedulable(
                 name=arguments["name"], schedulable=(name == "uncordon_node")
             )
+        elif name == "list_clusters":
+            result = await k3s.list_clusters()
+        elif name == "use_cluster":
+            result = await k3s.use_cluster(name=arguments["name"])
         elif name == "get_nodes":
             result = await k3s.get_nodes()
         elif name == "scale_deployment":
@@ -1875,15 +1996,20 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         # Format response
         if isinstance(result, str):
             # For logs and command output
-            return [TextContent(type="text", text=result)]
+            content = [TextContent(type="text", text=result)]
         else:
             # For structured data
-            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+            content = [TextContent(type="text", text=json.dumps(result, indent=2))]
+        # With several clusters available, say which one answered
+        if k3s.multi_cluster() and name not in ("list_clusters", "use_cluster"):
+            content.append(TextContent(type="text", text=f"cluster: {k3s.cluster_name}"))
+        return content
 
     except Exception as e:
         # Raising lets the MCP SDK return the message with isError: true, so
         # clients can tell a failure from a result without parsing the text
-        error_msg = f"Error executing {name}: {str(e)}"
+        where = f" on {k3s.cluster_name}" if k3s.multi_cluster() else ""
+        error_msg = f"Error executing {name}{where}: {str(e)}"
         print(error_msg, file=sys.stderr)
         raise Exception(error_msg) from e
 
@@ -1892,6 +2018,7 @@ async def main():
     """Main entry point for the MCP server."""
     print("Starting K3s MCP Server...", file=sys.stderr)
     print(f"Using kubeconfig: {KUBECONFIG}", file=sys.stderr)
+    print(f"Cluster folder: {KUBECONFIG_DIR}", file=sys.stderr)
     print(f"Default namespace: {DEFAULT_NAMESPACE}", file=sys.stderr)
 
     # Run the server

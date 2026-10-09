@@ -4,14 +4,14 @@
 
 <p align="center">
   <a href="https://github.com/ry-ops/k3s-mcp-server/releases/latest"><img src="https://img.shields.io/github/v/release/ry-ops/k3s-mcp-server?color=3fd68b" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/tools-30-ffc61c" alt="30 tools">
+  <img src="https://img.shields.io/badge/tools-32-ffc61c" alt="32 tools">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3ec7ff" alt="Python 3.10+"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-b58cff" alt="MCP"></a>
   <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-and%20any%20Kubernetes-ff8a1f" alt="K3s"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b96ad" alt="MIT"></a>
 </p>
 
-<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 30 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
+<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 32 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
 
 <p align="center">
   <a href="#tools">Tools</a> ·
@@ -37,13 +37,13 @@
 
 ## 🌟 Why this one
 
-- **Reads and writes, 30 tools.** Workloads (deployments, StatefulSets, DaemonSets, Jobs, CronJobs), networking (services, ingresses), config and storage (ConfigMaps, volume claims), nodes, logs and any custom resource to look; scale, restart, roll out, roll back, exec, apply, delete and cordon to act.
+- **Reads and writes, 32 tools.** Workloads (deployments, StatefulSets, DaemonSets, Jobs, CronJobs), networking (services, ingresses), config and storage (ConfigMaps, volume claims), nodes, logs and any custom resource to look; scale, restart, roll out, roll back, exec, apply, delete and cordon to act.
 - **Safe rollouts.** Restart a workload with a rolling update, watch it finish, see each revision's images, and roll a bad deploy back. A rollout stuck on a bad image is reported as failed, not left hanging.
 - **Built for troubleshooting.** Events, a pod's container states and exit codes, logs from the crashed container, and live CPU and memory from metrics-server, so *"why is this pod crash-looping?"* gets a real answer.
 - **Apply like kubectl.** `apply_manifest` uses server-side apply: it creates or updates, takes several YAML documents at once, handles any kind including custom resources, and has a dry run. `delete_resource` takes any kind too, with its own dry run.
 - **Least privilege, ready to apply.** [`deploy/rbac.yaml`](deploy/rbac.yaml) gives the server its own service account: it can read everywhere, write only in the namespaces you pick, and never read Secrets outside them. Delete one Secret to cut it off.
 - **Cluster-wide by default.** List tools search every namespace unless you name one, and label selectors narrow them down.
-- **Any client, any number of clusters.** Works with Claude Code, Claude Desktop or any stdio MCP client. Register it once per kubeconfig and say *"on k3s-prod, …"*.
+- **Any client, any number of clusters.** Works with Claude Code, Claude Desktop or any stdio MCP client. Drop scoped kubeconfigs in `~/.kube/clusters/` and switch with *"use lab2"*, no restart; every result names the cluster it came from.
 - **Checks itself first.** `scripts/test-connection.sh` runs the server's own client against your cluster before you connect a client.
 - **Small enough to read.** One Python module on the official Kubernetes client, with no database, no daemon and no state. [ARCHITECTURE.md](docs/ARCHITECTURE.md) maps every tool to its API call and the RBAC it needs.
 
@@ -72,6 +72,7 @@
 | 👀 | `describe_pod` | A pod's conditions, container states, restarts, last exit code and reason, resources and recent events (no environment variables) |
 | 👀 | `get_resource_usage` | CPU and memory for pods or nodes from metrics-server, nodes as a percent of allocatable |
 | 👀 | `get_cluster_info` | Version, nodes and namespaces at a glance |
+| 🔀 | `list_clusters` · `use_cluster` | The clusters in your kubeconfig folder and which is active; switch to another without a restart. Admin kubeconfigs (`*-admin.yaml`) are never offered. |
 | 👀 | `get_resource` | Any kind, including custom resources (K3s `HelmChart`s, Traefik `IngressRoute`s, cert-manager `Certificate`s): list with Ready status, or one whole object. Secrets are refused. |
 | 👀 | `rollout_status` | Whether a Deployment, StatefulSet or DaemonSet has finished rolling out; can wait for it |
 | 👀 | `rollout_history` | A deployment's revisions with images and change cause |
@@ -165,6 +166,7 @@ claude mcp add k3s --scope user -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" \
 |---|---|---|
 | `KUBECONFIG` | `~/.kube/config` | The kubeconfig to use; its current context and RBAC decide what the server can reach. Point it at the scoped kubeconfig from [Safety](#safety), not your admin one. |
 | `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools act when a call doesn't name a namespace. List tools search all namespaces instead. |
+| `K3S_KUBECONFIG_DIR` | `~/.kube/clusters` | A folder of kubeconfigs that `use_cluster` switches between. Files ending in `-admin.yaml` are skipped. |
 | `K3S_DEBUG` | `false` | Extra startup logging to stderr |
 
 <a id="guides"></a>
@@ -221,7 +223,6 @@ Use absolute paths, check the config is valid JSON, and quit Claude Desktop comp
 Planned, not built yet:
 
 - [ ] **Tests and CI.** A pytest suite for the server's logic (rollout rules, kind lookup, apply results, the Secrets refusal) and a workflow that runs lint and tests on every pull request.
-- [ ] **Switch clusters without a restart.** `list_clusters` and `use_cluster` over a folder of kubeconfigs, each with its own scoped identity.
 - [ ] **Follow logs.** Stream new lines from a pod instead of returning the last *N*.
 - [ ] **Drain nodes.** Evict a node's pods after `cordon_node`, respecting PodDisruptionBudgets.
 - [ ] **Roll back StatefulSets and DaemonSets.** `rollout_history` and `rollout_undo` from their ControllerRevisions; today they cover Deployments only.
@@ -230,7 +231,7 @@ Planned, not built yet:
 ## 🧱 Project layout
 
 ```
-src/k3s_mcp_server/server.py   the server that gets packaged and installed (30 tools)
+src/k3s_mcp_server/server.py   the server that gets packaged and installed (32 tools)
 docs/                          QUICKSTART, CLIENTS and ARCHITECTURE guides, and the animations on this page
 scripts/                       setup.sh and test-connection.sh
 deploy/rbac.yaml               a least-privilege service account for the server

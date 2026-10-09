@@ -51,7 +51,15 @@ Any client that launches stdio servers works. Give it the same command, argument
 
 ## Several clusters
 
-Register the server once per cluster, each with its own name and kubeconfig. They share one checkout:
+**One server, a folder of clusters.** Put a scoped kubeconfig per cluster in `~/.kube/clusters/` (or set `K3S_KUBECONFIG_DIR`), one file each, named after the cluster: `lab2.yaml`, `prod.yaml`. Then:
+
+- *"Which clusters can you reach?"* runs `list_clusters`: each file's name, API server and namespace, which one is active, and a warning for any file other users can read. It never returns credentials.
+- *"Switch to lab2"* runs `use_cluster`. It connects and checks the API server first; if that fails, the current cluster stays active. Later calls go to the new cluster, with no restart.
+- While more than one cluster is available, every result ends with `cluster: <name>`, and errors say `on <name>`, so a call can't silently hit the wrong cluster.
+
+`KUBECONFIG` is still the cluster active at startup, and it's listed too. Files ending in `-admin.yaml` are skipped, so switching clusters never swaps the scoped identity for an admin one; each file brings its own RBAC.
+
+**Or register the server once per cluster,** each with its own name and kubeconfig. They share one checkout:
 
 ```json
 {
@@ -72,6 +80,7 @@ The name shows up in the client, so you can say *"on k3s-prod, …"*. The server
 |---|---|---|
 | `KUBECONFIG` | `~/.kube/config` | The kubeconfig to load. If the file is missing, the server prints an error and exits at startup. Set it to the scoped kubeconfig, not your admin one. |
 | `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools (`get_deployment`, `describe_pod`, `get_configmaps` with a name, `get_logs`, `scale_deployment`, `restart_pod`, `execute_command`, `delete_resource`) act when the call doesn't name a namespace. It's also where `apply_manifest` puts namespaced objects whose YAML has no namespace. |
+| `K3S_KUBECONFIG_DIR` | `~/.kube/clusters` | Folder of kubeconfigs for `list_clusters` and `use_cluster`. `*-admin.yaml` files are skipped. A missing folder just means one cluster. |
 | `K3S_DEBUG` | `false` | `true` logs extra startup detail to stderr. |
 
 The list tools (`get_pods`, `get_deployments`, `get_statefulsets`, `get_daemonsets`, `get_jobs`, `get_cronjobs`, `get_services`, `get_ingresses`, `get_configmaps`, `get_pvcs`, `get_events` and `get_resource_usage`) search **every namespace** when no namespace is given, whatever `K3S_DEFAULT_NAMESPACE` says.
@@ -97,6 +106,8 @@ If that passes, the problem is in the client config. If it fails, the error tell
 | `403` from `cordon_node` or `uncordon_node` | Expected with `deploy/rbac.yaml` alone. Apply `deploy/rbac-node-ops.yaml` to allow it. |
 | `rollout_status` says the rollout exceeded its progress deadline | New pods never became available, often because of a bad image or failing probes. Check `describe_pod` on a new pod, then `rollout_undo`. |
 | `403` on a custom resource in a namespace you gave `edit` | The CRD doesn't aggregate into `edit`. Grant that kind with your own Role. |
+| `No cluster named …` from `use_cluster` | The name isn't a file in `K3S_KUBECONFIG_DIR` (without `.yaml`), or it ends in `-admin`. `list_clusters` shows the valid names. |
+| `Couldn't connect to …, so … stays active` | That kubeconfig's API server isn't reachable or its token was revoked. Nothing changed; fix the file and try again. |
 | `Metrics API not available` | `get_resource_usage` needs metrics-server. K3s ships it; on other clusters, install it. |
 | Tools don't appear | The JSON is invalid (check with `python3 -m json.tool <file>`), a path isn't absolute, or Claude Desktop wasn't fully quit. |
 | `AttributeError: 'Server' object has no attribute 'list_tools'` | An old checkout resolved `mcp` 2.x. Pull the latest code and run `uv sync`; `pyproject.toml` now pins `mcp<2`. |

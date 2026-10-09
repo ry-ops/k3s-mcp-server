@@ -22,7 +22,7 @@ flowchart LR
 
 | Piece | What it does |
 |---|---|
-| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 30 tool definitions with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
+| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 32 tool definitions with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
 | **Tool router** | One `call_tool` function: fills in the default namespace, calls the matching `K3sClient` method, and formats the result. |
 | **`K3sClient`** | Loads the kubeconfig once and holds the API clients. The tools use `CoreV1Api`, `AppsV1Api`, `BatchV1Api`, `NetworkingV1Api`, `CustomObjectsApi` for metrics, and a `DynamicClient` for `apply_manifest`, `get_resource` and `delete_resource`, which is created on first use because it runs API discovery. Each method is a thin wrapper over one or two API calls that trims the response down to the fields worth reading. |
 | **Kubernetes API** | Does all the real work, including authentication and authorization. The server never checks permissions itself. |
@@ -30,7 +30,7 @@ flowchart LR
 ## Startup
 
 1. The client runs `uv --directory <repo> run k3s-mcp-server`. That console script calls `run()`, which runs the async `main()`.
-2. Importing the module creates the single `K3sClient`, which loads `$KUBECONFIG` (default `~/.kube/config`). A missing or unreadable file prints an error to stderr and **exits**. Nothing is reported over MCP, so check the client's log.
+2. Importing the module creates the single `K3sClient`, which loads `$KUBECONFIG` (default `~/.kube/config`) into its own `ApiClient`. A missing or unreadable file prints an error to stderr and **exits**. Every API client (core, apps, batch, networking, custom objects, dynamic, version) is built from that one `ApiClient`, so `use_cluster` can swap them all at once. Nothing is reported over MCP, so check the client's log.
 3. `main()` opens the stdio transport and serves requests. Everything the server prints goes to stderr, because stdout carries the protocol.
 
 Loading the kubeconfig doesn't contact the cluster. An unreachable API server shows up as an error on the first tool call, not at startup.
@@ -89,6 +89,8 @@ sequenceDiagram
 | `rollout_status` | `read_namespaced_{deployment,stateful_set,daemon_set}`, polled every 2 s up to `wait_seconds` (max 300). Done and failed follow kubectl's rules, including `ProgressDeadlineExceeded`. | `get` on that kind |
 | `rollout_history` | `read_namespaced_deployment` + `list_namespaced_replica_set` by the deployment's selector, kept if owned by it, keyed by `deployment.kubernetes.io/revision` | `get deployments.apps`, `list replicasets.apps` |
 | `get_cluster_info` | `VersionApi.get_code` + `list_node` + `list_namespace` | `list nodes`, `list namespaces` |
+| `list_clusters` | No API call: reads the kubeconfigs in `K3S_KUBECONFIG_DIR` (skipping `*-admin.yaml`) plus `KUBECONFIG`, and returns each current context's server and namespace | none |
+| `use_cluster` | `new_client_from_config` for that file, then `VersionApi.get_code` to check it; only on success are the API clients swapped | whatever the new file's identity has |
 | `scale_deployment` | `patch_namespaced_deployment_scale` | `patch deployments.apps/scale` |
 | `restart_pod` | `delete_namespaced_pod`; the owning controller re-creates it | `delete pods` |
 | `execute_command` | `connect_get_namespaced_pod_exec` over a WebSocket stream, no TTY or stdin | `create pods/exec` |
