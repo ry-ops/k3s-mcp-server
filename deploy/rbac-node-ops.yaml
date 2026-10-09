@@ -1,0 +1,33 @@
+# Optional: let k3s-mcp-server cordon and uncordon nodes.
+#
+# cordon_node and uncordon_node patch a node's spec.unschedulable, which
+# deploy/rbac.yaml doesn't allow. Apply this on top of it only if you want the
+# server to take nodes in and out of scheduling:
+#
+#   kubectl apply -f deploy/rbac-node-ops.yaml
+#
+# Patching a node is cluster-wide: it affects every namespace's pods. Remove it
+# again with:
+#
+#   kubectl delete -f deploy/rbac-node-ops.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k3s-mcp-node-ops
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k3s-mcp-node-ops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k3s-mcp-node-ops
+subjects:
+  - kind: ServiceAccount
+    name: k3s-mcp
+    namespace: k3s-mcp

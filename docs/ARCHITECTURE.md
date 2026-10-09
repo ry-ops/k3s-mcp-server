@@ -22,9 +22,9 @@ flowchart LR
 
 | Piece | What it does |
 |---|---|
-| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 23 tool definitions with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
+| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 30 tool definitions with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
 | **Tool router** | One `call_tool` function: fills in the default namespace, calls the matching `K3sClient` method, and formats the result. |
-| **`K3sClient`** | Loads the kubeconfig once and holds the API clients. The tools use `CoreV1Api`, `AppsV1Api`, `BatchV1Api`, `NetworkingV1Api`, `CustomObjectsApi` for metrics, and a `DynamicClient` for `apply_manifest` and `delete_resource`, which is created on first use because it runs API discovery. Each method is a thin wrapper over one or two API calls that trims the response down to the fields worth reading. |
+| **`K3sClient`** | Loads the kubeconfig once and holds the API clients. The tools use `CoreV1Api`, `AppsV1Api`, `BatchV1Api`, `NetworkingV1Api`, `CustomObjectsApi` for metrics, and a `DynamicClient` for `apply_manifest`, `get_resource` and `delete_resource`, which is created on first use because it runs API discovery. Each method is a thin wrapper over one or two API calls that trims the response down to the fields worth reading. |
 | **Kubernetes API** | Does all the real work, including authentication and authorization. The server never checks permissions itself. |
 
 ## Startup
@@ -55,7 +55,7 @@ sequenceDiagram
 ### Namespaces
 
 - **List tools** (`get_pods`, `get_deployments`, `get_statefulsets`, `get_daemonsets`, `get_jobs`, `get_cronjobs`, `get_services`, `get_ingresses`, `get_configmaps`, `get_pvcs`, `get_events`, `get_resource_usage`): no namespace means **all namespaces** (`list_*_for_all_namespaces`).
-- **Single-object tools**: no namespace means `K3S_DEFAULT_NAMESPACE` (default `default`). That includes `get_configmaps` when it's given a `name`, and `delete_resource` for namespaced kinds.
+- **Single-object tools**: no namespace means `K3S_DEFAULT_NAMESPACE` (default `default`). That includes `get_configmaps` when it's given a `name`, the rollout tools, and `delete_resource` for namespaced kinds. `get_resource` follows the list rule: no namespace lists all namespaces.
 - **`apply_manifest`**: for namespaced kinds, uses the `namespace` argument, then the manifest's own `metadata.namespace`, then `K3S_DEFAULT_NAMESPACE`. Cluster-scoped kinds get no namespace.
 
 ### Results and errors
@@ -85,18 +85,24 @@ sequenceDiagram
 | `get_events` | `list_namespaced_event` / `list_event_for_all_namespaces`, with field selectors for object name, kind and type; sorted newest first | `list events` |
 | `describe_pod` | `read_namespaced_pod` + `list_namespaced_event` for that pod. Environment variables are left out because they can hold credentials. | `get pods`, `list events` |
 | `get_resource_usage` | `metrics.k8s.io/v1beta1` pods or nodes through `CustomObjectsApi`, plus `list_node` for node allocatable | `list pods.metrics.k8s.io` or `nodes.metrics.k8s.io` (metrics-server aggregates these into `view`), and `list nodes` |
+| `get_resource` | Discovery resolves the kind, then a dynamic `get` (list with `limit` and a label selector, or one object without `managedFields`). Secrets are refused before any call. | `list` or `get` on that kind |
+| `rollout_status` | `read_namespaced_{deployment,stateful_set,daemon_set}`, polled every 2 s up to `wait_seconds` (max 300). Done and failed follow kubectl's rules, including `ProgressDeadlineExceeded`. | `get` on that kind |
+| `rollout_history` | `read_namespaced_deployment` + `list_namespaced_replica_set` by the deployment's selector, kept if owned by it, keyed by `deployment.kubernetes.io/revision` | `get deployments.apps`, `list replicasets.apps` |
 | `get_cluster_info` | `VersionApi.get_code` + `list_node` + `list_namespace` | `list nodes`, `list namespaces` |
 | `scale_deployment` | `patch_namespaced_deployment_scale` | `patch deployments.apps/scale` |
 | `restart_pod` | `delete_namespaced_pod`; the owning controller re-creates it | `delete pods` |
 | `execute_command` | `connect_get_namespaced_pod_exec` over a WebSocket stream, no TTY or stdin | `create pods/exec` |
 | `apply_manifest` | Per document: discovery for the kind, `get`, then a server-side apply `PATCH` (`application/apply-patch+yaml`, field manager `k3s-mcp-server`, optional `dryRun=All` and `force`) | `get` and `patch` on that kind (apply creates through `patch`) |
+| `rollout_restart` | Strategic merge patch of `spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]` | `patch` on that kind |
+| `rollout_undo` | As `rollout_history`, then a JSON patch replacing `spec.template` with the target ReplicaSet's template (minus `pod-template-hash`) | `patch deployments.apps`, `list replicasets.apps` |
+| `cordon_node` / `uncordon_node` | `patch_node` setting `spec.unschedulable` | `patch nodes` (cluster-scoped; only from [`deploy/rbac-node-ops.yaml`](../deploy/rbac-node-ops.yaml)) |
 | `delete_resource` | Discovery resolves the kind (kind, plural, singular or short name; core and `apps` win ties, otherwise `api_version` is required), then `DELETE` with `propagationPolicy: Background` and optional `dryRun` in the body | `delete` on that kind |
 
-[`deploy/rbac.yaml`](../deploy/rbac.yaml) grants all of the read rows cluster-wide (`view` plus a node-reader role) and the write rows only in namespaces bound to `edit`. Custom resources are covered only when their CRD's ClusterRoles aggregate into `view` and `edit`; many, such as Traefik's, don't.
+[`deploy/rbac.yaml`](../deploy/rbac.yaml) grants all of the read rows cluster-wide (`view` plus a node-reader role) and the write rows only in namespaces bound to `edit`. Custom resources are covered only when their CRD's ClusterRoles aggregate into `view` and `edit`: cert-manager's do, while K3s's `HelmChart` and Traefik's don't. Node cordoning needs the opt-in [`deploy/rbac-node-ops.yaml`](../deploy/rbac-node-ops.yaml).
 
 ## Security boundary
 
-The server holds no secrets of its own and adds no permission checks. **The kubeconfig's RBAC is the boundary.** Five tools change state, and `execute_command` runs arbitrary commands inside containers, so:
+The server holds no secrets of its own and adds no permission checks. **The kubeconfig's RBAC is the boundary.** Nine tools change state, and `execute_command` runs arbitrary commands inside containers, so:
 
 - Give the server a scoped service account, not cluster-admin. See the README's [Safety](../README.md#safety) section.
 - Keep tool approval on in your MCP client, so a person sees each write before it runs.
@@ -108,6 +114,8 @@ These are properties of the current code, not of Kubernetes:
 
 - **`apply_manifest` needs a name.** Server-side apply addresses objects by name, so `generateName` isn't supported.
 - **No log following.** `get_logs` returns the last *N* lines.
+- **Rollbacks are for Deployments.** `rollout_undo` and `rollout_history` read ReplicaSets; StatefulSet and DaemonSet history (ControllerRevisions) isn't covered.
+- **No drain.** `cordon_node` stops scheduling; evicting running pods is left to you.
 - **Usage needs metrics-server.** K3s bundles it; on other clusters `get_resource_usage` returns *Metrics API not available* until it's installed.
 - **Blocking calls.** The Kubernetes client is synchronous and is called directly from async handlers, so one slow API call holds up the next. That's fine for one client issuing one call at a time, which is how MCP clients use it.
 - **Errors aren't flagged.** Failures come back as normal text, not with `isError: true`.
@@ -118,6 +126,7 @@ These are properties of the current code, not of Kubernetes:
 src/k3s_mcp_server/server.py   the whole server: K3sClient, tool definitions, router, entry points
 src/k3s_mcp_server/__init__.py package metadata (__version__)
 deploy/rbac.yaml               least-privilege service account for the server
+deploy/rbac-node-ops.yaml      optional ClusterRole for cordon_node and uncordon_node
 scripts/setup.sh               checks uv, runs uv sync
 scripts/test-connection.sh     exercises K3sClient against your cluster
 docs/                          these guides and the README animations

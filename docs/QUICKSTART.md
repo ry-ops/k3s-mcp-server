@@ -74,7 +74,7 @@ Start a new session so the tools load.
 
 ## 6. Try it
 
-Each of these maps onto one or two of the 23 tools:
+Each of these maps onto one or two of the 30 tools:
 
 | Ask | Tool |
 |---|---|
@@ -95,6 +95,9 @@ Each of these maps onto one or two of the 23 tools:
 | *"Apply this YAML: …"* (one or more documents) | `apply_manifest` |
 | *"Dry-run this change first."* | `apply_manifest` with `dry_run` |
 | *"Delete the old `report` CronJob."* | `delete_resource` |
+| *"Restart `web` and tell me when it's done."* | `rollout_restart`, then `rollout_status` with `wait_seconds` |
+| *"That deploy broke things; roll it back."* | `rollout_history`, then `rollout_undo` |
+| *"Which Helm charts did K3s install?"* | `get_resource` with kind `HelmChart` (needs read access to that CRD) |
 
 Writes outside the namespaces you gave `edit` come back as `403 Forbidden`. That's the RBAC from step 3 doing its job.
 
@@ -102,6 +105,8 @@ Writes outside the namespaces you gave `edit` come back as `403 Forbidden`. That
 
 - **Read Secrets.** No tool does, on purpose: their values would end up in the conversation.
 - **Follow logs.** `get_logs` returns the last *N* lines (100 by default).
+- **Drain nodes.** `cordon_node` stops new pods landing on a node, but moving running pods off it is up to you.
+- **Roll back StatefulSets or DaemonSets.** `rollout_undo` handles Deployments only.
 
 ## Checklist
 
@@ -110,7 +115,7 @@ Writes outside the namespaces you gave `edit` come back as `403 Forbidden`. That
 - [ ] `deploy/rbac.yaml` applied, with `edit` only where you want writes
 - [ ] `~/.kube/k3s-mcp.yaml` written, mode `600`
 - [ ] `bash scripts/test-connection.sh` passes with that kubeconfig
-- [ ] Your client shows `k3s` as connected and lists 23 tools
+- [ ] Your client shows `k3s` as connected and lists 30 tools
 - [ ] A read works, and a write outside your `edit` namespaces returns `403`
 
 Stuck? See [CLIENTS.md → Troubleshooting](CLIENTS.md#troubleshooting).
