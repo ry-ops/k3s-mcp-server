@@ -3,7 +3,7 @@
 # - Read access across the cluster: the built-in `view` ClusterRole, plus node
 #   reads, which `view` leaves out (get_nodes and get_cluster_info need them).
 #   `view` can't read Secrets.
-# - Write access (scale, restart, exec, apply, delete) only in the namespaces
+# - Write access (scale, restart, rollouts, exec, apply, delete) only in the namespaces
 #   that get an `edit` RoleBinding. `edit` can read Secrets in those namespaces.
 #
 # Apply with an admin kubeconfig, then build the server's kubeconfig from the

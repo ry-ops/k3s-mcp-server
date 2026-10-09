@@ -94,6 +94,8 @@ If that passes, the problem is in the client config. If it fails, the error tell
 | `Apply failed with 1 conflict` from `apply_manifest` | Another field manager owns that field, for example `replicas` after `scale_deployment`. Apply again with `force`, or leave the field out of the YAML. |
 | `The cluster has no kind …` | The `apiVersion` or `kind` is wrong, or the CRD isn't installed. |
 | `… is ambiguous (…); pass api_version` | The kind exists in more than one API group. Name the one you mean, for example `api_version: events.k8s.io/v1`. |
+| `403` from `cordon_node` or `uncordon_node` | Expected with `deploy/rbac.yaml` alone. Apply `deploy/rbac-node-ops.yaml` to allow it. |
+| `rollout_status` says the rollout exceeded its progress deadline | New pods never became available, often because of a bad image or failing probes. Check `describe_pod` on a new pod, then `rollout_undo`. |
 | `403` on a custom resource in a namespace you gave `edit` | The CRD doesn't aggregate into `edit`. Grant that kind with your own Role. |
 | `Metrics API not available` | `get_resource_usage` needs metrics-server. K3s ships it; on other clusters, install it. |
 | Tools don't appear | The JSON is invalid (check with `python3 -m json.tool <file>`), a path isn't absolute, or Claude Desktop wasn't fully quit. |

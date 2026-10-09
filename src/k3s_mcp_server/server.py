@@ -15,7 +15,7 @@ Configuration via environment variables:
 
 Author: ry-ops
 License: MIT
-Version: 1.3.0
+Version: 1.4.0
 """
 
 import os
@@ -25,6 +25,8 @@ import yaml
 from typing import Any, Optional, Dict, List
 from pathlib import Path
 import re
+import asyncio
+from datetime import datetime, timezone
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -514,7 +516,7 @@ class K3sClient:
         try:
             # Patch the deployment
             body = {"spec": {"replicas": replicas}}
-            deployment = self.apps_v1.patch_namespaced_deployment_scale(
+            self.apps_v1.patch_namespaced_deployment_scale(
                 name=name,
                 namespace=namespace,
                 body=body
@@ -549,6 +551,230 @@ class K3sClient:
             }
         except ApiException as e:
             raise Exception(f"Failed to delete pod {name}: {e}")
+
+    # Rollouts ---------------------------------------------------------------
+
+    _ROLLOUT_KINDS = {
+        "deployment": "deployment", "deployments": "deployment", "deploy": "deployment",
+        "statefulset": "stateful_set", "statefulsets": "stateful_set", "sts": "stateful_set",
+        "daemonset": "daemon_set", "daemonsets": "daemon_set", "ds": "daemon_set",
+    }
+
+    _KIND_NAMES = {"deployment": "Deployment", "stateful_set": "StatefulSet",
+                   "daemon_set": "DaemonSet"}
+
+    def _rollout_kind(self, kind: str) -> str:
+        """Map a workload kind to the AppsV1Api method suffix."""
+        suffix = self._ROLLOUT_KINDS.get(kind.lower())
+        if not suffix:
+            raise Exception(f"Rollouts work on Deployments, StatefulSets and DaemonSets, not {kind!r}")
+        return suffix
+
+    async def rollout_restart(self, kind: str, name: str, namespace: str) -> Dict[str, Any]:
+        """
+        Restart a workload's pods with a rolling update, like `kubectl rollout restart`.
+
+        Sets the kubectl.kubernetes.io/restartedAt annotation on the pod template.
+        """
+        suffix = self._rollout_kind(kind)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        body = {"spec": {"template": {"metadata": {"annotations": {
+            "kubectl.kubernetes.io/restartedAt": now}}}}}
+        try:
+            getattr(self.apps_v1, f"patch_namespaced_{suffix}")(
+                name=name, namespace=namespace, body=body, field_manager=FIELD_MANAGER)
+        except ApiException as e:
+            raise Exception(f"Failed to restart {self._KIND_NAMES[suffix]} {name}: "
+                            f"{self._api_error_message(e)}")
+        return {"kind": self._KIND_NAMES[suffix], "name": name, "namespace": namespace,
+                "restarted_at": now,
+                "status": "Rolling restart started; check progress with rollout_status"}
+
+    def _rollout_state(self, suffix: str, obj) -> Dict[str, Any]:
+        """Work out whether a rollout is finished, following kubectl's rules."""
+        spec, status = obj.spec, obj.status
+        observed = (status.observed_generation or 0) >= (obj.metadata.generation or 0)
+
+        if suffix == "deployment":
+            want = spec.replicas if spec.replicas is not None else 1
+            updated, ready, available = (status.updated_replicas or 0,
+                                         status.ready_replicas or 0, status.available_replicas or 0)
+            total = status.replicas or 0
+            progressing = next((c for c in status.conditions or [] if c.type == "Progressing"), None)
+            # Like kubectl, trust the deadline condition only once the controller has
+            # seen the latest spec; otherwise it may describe the previous rollout.
+            if observed and progressing and progressing.reason == "ProgressDeadlineExceeded":
+                return {"done": False, "failed": True,
+                        "message": f"Rollout exceeded its progress deadline: {progressing.message}"}
+            if not observed:
+                message, done = "Waiting for the controller to see the new spec", False
+            elif updated < want:
+                message, done = f"{updated} of {want} replicas updated", False
+            elif total > updated:
+                message, done = f"{total - updated} old replicas pending termination", False
+            elif available < updated:
+                message, done = f"{available} of {updated} updated replicas available", False
+            else:
+                message, done = f"Rolled out: {available}/{want} available", True
+            counts = {"desired": want, "updated": updated, "ready": ready, "available": available}
+
+        elif suffix == "stateful_set":
+            want = spec.replicas if spec.replicas is not None else 1
+            updated, ready = status.updated_replicas or 0, status.ready_replicas or 0
+            on_delete = spec.update_strategy and spec.update_strategy.type == "OnDelete"
+            if on_delete:
+                return {"done": True, "message": "OnDelete strategy: pods update only when deleted",
+                        "desired": want, "updated": updated, "ready": ready}
+            if not observed:
+                message, done = "Waiting for the controller to see the new spec", False
+            elif ready < want:
+                message, done = f"{ready} of {want} pods ready", False
+            elif status.update_revision != status.current_revision:
+                message, done = f"{updated} of {want} pods updated", False
+            else:
+                message, done = f"Rolled out: {ready}/{want} ready", True
+            counts = {"desired": want, "updated": updated, "ready": ready}
+
+        else:
+            want = status.desired_number_scheduled or 0
+            updated, available = status.updated_number_scheduled or 0, status.number_available or 0
+            if not observed:
+                message, done = "Waiting for the controller to see the new spec", False
+            elif updated < want:
+                message, done = f"{updated} of {want} pods updated", False
+            elif available < want:
+                message, done = f"{available} of {want} updated pods available", False
+            else:
+                message, done = f"Rolled out: {available}/{want} available", True
+            counts = {"desired": want, "updated": updated, "available": available}
+
+        return {"done": done, "message": message, **counts}
+
+    async def rollout_status(self, kind: str, name: str, namespace: str,
+                             wait_seconds: int = 0) -> Dict[str, Any]:
+        """
+        Report whether a workload's rollout has finished, optionally waiting for it.
+
+        Args:
+            kind: Deployment, StatefulSet or DaemonSet
+            name: Workload name
+            namespace: Namespace
+            wait_seconds: Poll until done or this many seconds pass (0 checks once; max 300)
+        """
+        suffix = self._rollout_kind(kind)
+        read = getattr(self.apps_v1, f"read_namespaced_{suffix}")
+        deadline = asyncio.get_running_loop().time() + max(0, min(wait_seconds, 300))
+        while True:
+            try:
+                obj = read(name=name, namespace=namespace)
+            except ApiException as e:
+                raise Exception(f"Failed to get {self._KIND_NAMES[suffix]} {name}: "
+                                f"{self._api_error_message(e)}")
+            state = self._rollout_state(suffix, obj)
+            if state["done"] or state.get("failed") or asyncio.get_running_loop().time() >= deadline:
+                break
+            await asyncio.sleep(2)
+        return {"kind": self._KIND_NAMES[suffix], "name": name, "namespace": namespace, **state}
+
+    def _deployment_revisions(self, name: str, namespace: str):
+        """The deployment and its ReplicaSets keyed by revision number."""
+        try:
+            deployment = self.apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
+            selector = ",".join(f"{k}={v}" for k, v in
+                                (deployment.spec.selector.match_labels or {}).items())
+            replica_sets = self.apps_v1.list_namespaced_replica_set(
+                namespace=namespace, label_selector=selector).items
+        except ApiException as e:
+            raise Exception(f"Failed to read deployment {name}: {self._api_error_message(e)}")
+
+        revisions = {}
+        for rs in replica_sets:
+            if not any(o.uid == deployment.metadata.uid for o in rs.metadata.owner_references or []):
+                continue
+            rev = (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision")
+            if rev and rev.isdigit():
+                revisions[int(rev)] = rs
+        return deployment, revisions
+
+    async def rollout_history(self, name: str, namespace: str) -> Dict[str, Any]:
+        """List a deployment's revisions with their images and change cause."""
+        deployment, revisions = self._deployment_revisions(name, namespace)
+        current = (deployment.metadata.annotations or {}).get("deployment.kubernetes.io/revision")
+        return {
+            "name": name,
+            "namespace": namespace,
+            "current_revision": int(current) if current and current.isdigit() else None,
+            "revisions": [
+                {
+                    "revision": rev,
+                    "images": self._images(rs.spec.template.spec),
+                    "change_cause": (rs.metadata.annotations or {}).get("kubernetes.io/change-cause"),
+                    "replicas": rs.status.replicas or 0,
+                    "created": self._ts(rs.metadata.creation_timestamp),
+                }
+                for rev, rs in sorted(revisions.items(), reverse=True)
+            ],
+        }
+
+    async def rollout_undo(self, name: str, namespace: str,
+                           to_revision: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Roll a deployment back to an earlier revision, like `kubectl rollout undo`.
+
+        Args:
+            name: Deployment name
+            namespace: Namespace
+            to_revision: Revision to roll back to (default: the one before the current)
+        """
+        deployment, revisions = self._deployment_revisions(name, namespace)
+        if not revisions:
+            raise Exception(f"Deployment {name} has no revision history")
+        current = max(revisions)
+        if to_revision is None:
+            older = [r for r in revisions if r < current]
+            if not older:
+                raise Exception(f"Deployment {name} has no earlier revision to roll back to")
+            to_revision = max(older)
+        if to_revision not in revisions:
+            raise Exception(f"Revision {to_revision} not found; available: {sorted(revisions)}")
+        if to_revision == current:
+            return {"name": name, "namespace": namespace, "revision": current,
+                    "status": "Already at that revision; nothing to do"}
+
+        template = self.apps_v1.api_client.sanitize_for_serialization(
+            revisions[to_revision].spec.template)
+        template.get("metadata", {}).get("labels", {}).pop("pod-template-hash", None)
+        patch = [{"op": "replace", "path": "/spec/template", "value": template}]
+        try:
+            self.apps_v1.patch_namespaced_deployment(
+                name=name, namespace=namespace, body=patch, field_manager=FIELD_MANAGER)
+        except ApiException as e:
+            raise Exception(f"Failed to roll back deployment {name}: {self._api_error_message(e)}")
+        return {
+            "name": name,
+            "namespace": namespace,
+            "rolled_back_to": to_revision,
+            "images": self._images(revisions[to_revision].spec.template.spec),
+            "status": "Rollback started; check progress with rollout_status",
+        }
+
+    # Nodes ------------------------------------------------------------------
+
+    async def set_node_schedulable(self, name: str, schedulable: bool) -> Dict[str, Any]:
+        """Cordon (schedulable=False) or uncordon (schedulable=True) a node."""
+        try:
+            node = self.core_v1.patch_node(
+                name=name, body={"spec": {"unschedulable": not schedulable}},
+                field_manager=FIELD_MANAGER)
+        except ApiException as e:
+            action = "uncordon" if schedulable else "cordon"
+            raise Exception(f"Failed to {action} node {name}: {self._api_error_message(e)}")
+        return {
+            "name": name,
+            "schedulable": not node.spec.unschedulable,
+            "status": "Uncordoned: new pods can be scheduled here" if schedulable
+            else "Cordoned: no new pods will be scheduled here; running pods stay",
+        }
 
     async def get_logs(self, pod_name: str, namespace: str, container: Optional[str] = None,
                       tail_lines: int = 100, previous: bool = False) -> str:
@@ -822,6 +1048,15 @@ class K3sClient:
         except (TypeError, ValueError, KeyError):
             return f"{e.status} {e.reason}"
 
+    @staticmethod
+    def _content(obj) -> Dict[str, Any]:
+        """An object as a dict, minus field-ownership bookkeeping."""
+        data = obj.to_dict()
+        meta = data.get("metadata", {})
+        for key in ("managedFields", "resourceVersion"):
+            meta.pop(key, None)
+        return data
+
     async def apply_manifest(self, manifest_yaml: str, namespace: Optional[str] = None,
                              dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
         """
@@ -879,7 +1114,7 @@ class K3sClient:
                     entry["namespace"] = obj_namespace
 
                 try:
-                    before = resource.get(name=name, namespace=obj_namespace).to_dict()
+                    before = self._content(resource.get(name=name, namespace=obj_namespace))
                 except NotFoundError:
                     before = None
 
@@ -892,10 +1127,11 @@ class K3sClient:
                     dry_run="All" if dry_run else None,
                 )
 
-                # A no-op apply returns the stored object untouched, dry run or not
+                # Compare content only: a first apply over kubectl-made objects adds a
+                # managedFields entry (and a new resourceVersion) without changing them
                 if before is None:
                     entry["action"] = "created"
-                elif applied.to_dict() == before:
+                elif self._content(applied) == before:
                     entry["action"] = "unchanged"
                 else:
                     entry["action"] = "configured"
@@ -953,6 +1189,61 @@ class K3sClient:
             options = ", ".join(f"{r.group_version} {r.kind}" for r in found)
             raise Exception(f"{kind!r} is ambiguous ({options}); pass api_version")
         return found[0]
+
+    async def get_resource(self, kind: str, name: Optional[str] = None,
+                           namespace: Optional[str] = None, api_version: Optional[str] = None,
+                           labels: Optional[str] = None, limit: int = 100) -> Any:
+        """
+        Read objects of any kind, including custom resources.
+
+        Without a name, lists objects with a short summary. With a name, returns
+        the whole object minus managedFields. Secrets are refused so their values
+        never reach the conversation.
+
+        Args:
+            kind: Kind, plural, singular or short name
+            name: Object name (omit to list)
+            namespace: Namespace (omit to list all namespaces; ignored for cluster-scoped kinds)
+            api_version: API group/version, needed only when the kind is ambiguous
+            labels: Label selector when listing
+            limit: Maximum number of objects when listing
+        """
+        resource = self._resolve_kind(kind, api_version)
+        if resource.group_version == "v1" and resource.kind == "Secret":
+            raise Exception("Reading Secrets isn't supported: their values would end up in "
+                            "the conversation")
+        obj_namespace = namespace if resource.namespaced else None
+
+        try:
+            if name:
+                obj = resource.get(name=name, namespace=obj_namespace).to_dict()
+                obj.get("metadata", {}).pop("managedFields", None)
+                return obj
+            result = resource.get(namespace=obj_namespace, label_selector=labels or None,
+                                  limit=limit)
+        except ApiException as e:
+            target = f"{resource.kind} {name}" if name else resource.name
+            raise Exception(f"Failed to get {target}: {self._api_error_message(e)}")
+
+        items = []
+        for item in result.to_dict().get("items", []):
+            meta = item.get("metadata", {})
+            summary = {"name": meta.get("name")}
+            if resource.namespaced:
+                summary["namespace"] = meta.get("namespace")
+            summary["created"] = meta.get("creationTimestamp")
+            conditions = (item.get("status") or {}).get("conditions") or []
+            ready = next((c for c in conditions if c.get("type") in ("Ready", "Available")), None)
+            if ready:
+                summary["ready"] = ready.get("status")
+                if ready.get("status") != "True" and ready.get("message"):
+                    summary["message"] = ready.get("message")
+            items.append(summary)
+        response = {"kind": resource.kind, "api_version": resource.group_version,
+                    "count": len(items), "items": items}
+        if (result.to_dict().get("metadata") or {}).get("continue"):
+            response["truncated"] = f"More than {limit} objects; narrow with namespace or labels"
+        return response
 
     async def delete_resource(self, kind: str, name: str, namespace: str,
                               api_version: Optional[str] = None,
@@ -1200,6 +1491,48 @@ TOOLS = [
         },
     ),
     Tool(
+        name="get_resource",
+        description="Read objects of any kind, including custom resources such as K3s HelmCharts, Traefik IngressRoutes or cert-manager Certificates. Without a name it lists objects with a short summary; with a name it returns the whole object. Secrets are refused.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "description": "Kind, plural or short name, e.g. HelmChart, certificates, sts"},
+                "name": {"type": "string", "description": "Object name (omit to list)"},
+                "namespace": {"type": "string", "description": "Namespace (omit to list all namespaces; ignored for cluster-scoped kinds)"},
+                "api_version": {"type": "string", "description": "API group/version, e.g. traefik.io/v1alpha1; only needed when the kind exists in several groups"},
+                "labels": {"type": "string", "description": "Label selector when listing"},
+                "limit": {"type": "integer", "description": "Maximum objects when listing (default: 100)"}
+            },
+            "required": ["kind"]
+        },
+    ),
+    Tool(
+        name="rollout_status",
+        description="Check whether a Deployment, StatefulSet or DaemonSet has finished rolling out, with updated, ready and available counts. Can wait for it to finish.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["Deployment", "StatefulSet", "DaemonSet"], "description": "Workload kind (default: Deployment)"},
+                "name": {"type": "string", "description": "Workload name"},
+                "namespace": {"type": "string", "description": "Namespace (default: default)"},
+                "wait_seconds": {"type": "integer", "description": "Keep checking until done or this many seconds pass (default: 0, max: 300)"}
+            },
+            "required": ["name"]
+        },
+    ),
+    Tool(
+        name="rollout_history",
+        description="List a Deployment's revisions with their images and change cause, newest first",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Deployment name"},
+                "namespace": {"type": "string", "description": "Namespace (default: default)"}
+            },
+            "required": ["name"]
+        },
+    ),
+    Tool(
         name="get_nodes",
         description="List all nodes in the cluster with resource information",
         inputSchema={"type": "object", "properties": {}},
@@ -1282,6 +1615,50 @@ TOOLS = [
                 "kind": {"type": "string", "enum": ["pods", "nodes"], "description": "pods or nodes (default: pods)"},
                 "namespace": {"type": "string", "description": "Namespace to filter pods (omit for all namespaces)"}
             }
+        },
+    ),
+    Tool(
+        name="rollout_restart",
+        description="Restart all pods of a Deployment, StatefulSet or DaemonSet with a rolling update, like kubectl rollout restart",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["Deployment", "StatefulSet", "DaemonSet"], "description": "Workload kind (default: Deployment)"},
+                "name": {"type": "string", "description": "Workload name"},
+                "namespace": {"type": "string", "description": "Namespace (default: default)"}
+            },
+            "required": ["name"]
+        },
+    ),
+    Tool(
+        name="rollout_undo",
+        description="Roll a Deployment back to an earlier revision (default: the previous one), like kubectl rollout undo",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Deployment name"},
+                "namespace": {"type": "string", "description": "Namespace (default: default)"},
+                "to_revision": {"type": "integer", "description": "Revision to roll back to (see rollout_history)"}
+            },
+            "required": ["name"]
+        },
+    ),
+    Tool(
+        name="cordon_node",
+        description="Mark a node unschedulable so no new pods land on it; running pods stay. Needs permission to patch nodes, which deploy/rbac.yaml doesn't grant by default.",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Node name"}},
+            "required": ["name"]
+        },
+    ),
+    Tool(
+        name="uncordon_node",
+        description="Mark a node schedulable again after cordon_node",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Node name"}},
+            "required": ["name"]
         },
     ),
     Tool(
@@ -1390,6 +1767,43 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             if arguments.get("name") and not namespace:
                 namespace = DEFAULT_NAMESPACE
             result = await k3s.get_configmaps(namespace=namespace, name=arguments.get("name"))
+        elif name == "get_resource":
+            result = await k3s.get_resource(
+                kind=arguments["kind"],
+                name=arguments.get("name"),
+                namespace=arguments.get("namespace"),
+                api_version=arguments.get("api_version"),
+                labels=arguments.get("labels"),
+                limit=arguments.get("limit", 100)
+            )
+        elif name == "rollout_status":
+            result = await k3s.rollout_status(
+                kind=arguments.get("kind", "Deployment"),
+                name=arguments["name"],
+                namespace=arguments.get("namespace", DEFAULT_NAMESPACE),
+                wait_seconds=arguments.get("wait_seconds", 0)
+            )
+        elif name == "rollout_history":
+            result = await k3s.rollout_history(
+                name=arguments["name"],
+                namespace=arguments.get("namespace", DEFAULT_NAMESPACE)
+            )
+        elif name == "rollout_restart":
+            result = await k3s.rollout_restart(
+                kind=arguments.get("kind", "Deployment"),
+                name=arguments["name"],
+                namespace=arguments.get("namespace", DEFAULT_NAMESPACE)
+            )
+        elif name == "rollout_undo":
+            result = await k3s.rollout_undo(
+                name=arguments["name"],
+                namespace=arguments.get("namespace", DEFAULT_NAMESPACE),
+                to_revision=arguments.get("to_revision")
+            )
+        elif name in ("cordon_node", "uncordon_node"):
+            result = await k3s.set_node_schedulable(
+                name=arguments["name"], schedulable=(name == "uncordon_node")
+            )
         elif name == "get_nodes":
             result = await k3s.get_nodes()
         elif name == "scale_deployment":

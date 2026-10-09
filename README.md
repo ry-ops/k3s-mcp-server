@@ -4,14 +4,14 @@
 
 <p align="center">
   <a href="https://github.com/ry-ops/k3s-mcp-server/releases/latest"><img src="https://img.shields.io/github/v/release/ry-ops/k3s-mcp-server?color=3fd68b" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/tools-23-ffc61c" alt="23 tools">
+  <img src="https://img.shields.io/badge/tools-30-ffc61c" alt="30 tools">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3ec7ff" alt="Python 3.10+"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-b58cff" alt="MCP"></a>
   <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-and%20any%20Kubernetes-ff8a1f" alt="K3s"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b96ad" alt="MIT"></a>
 </p>
 
-<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 23 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
+<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 30 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
 
 <p align="center">
   <a href="#tools">Tools</a> ·
@@ -36,7 +36,8 @@
 
 ## 🌟 Why this one
 
-- **Reads and writes, 23 tools.** Workloads (deployments, StatefulSets, DaemonSets, Jobs, CronJobs), networking (services, ingresses), config and storage (ConfigMaps, volume claims), nodes and logs to look; scale, restart, exec, apply and delete to act.
+- **Reads and writes, 30 tools.** Workloads (deployments, StatefulSets, DaemonSets, Jobs, CronJobs), networking (services, ingresses), config and storage (ConfigMaps, volume claims), nodes, logs and any custom resource to look; scale, restart, roll out, roll back, exec, apply, delete and cordon to act.
+- **Safe rollouts.** Restart a workload with a rolling update, watch it finish, see each revision's images, and roll a bad deploy back. A rollout stuck on a bad image is reported as failed, not left hanging.
 - **Built for troubleshooting.** Events, a pod's container states and exit codes, logs from the crashed container, and live CPU and memory from metrics-server, so *"why is this pod crash-looping?"* gets a real answer.
 - **Apply like kubectl.** `apply_manifest` uses server-side apply: it creates or updates, takes several YAML documents at once, handles any kind including custom resources, and has a dry run. `delete_resource` takes any kind too, with its own dry run.
 - **Least privilege, ready to apply.** [`deploy/rbac.yaml`](deploy/rbac.yaml) gives the server its own service account: it can read everywhere, write only in the namespaces you pick, and never read Secrets outside them. Delete one Secret to cut it off.
@@ -50,7 +51,7 @@
 ## 🧰 Tools
 
 <p align="center">
-  <img src="docs/rbac.svg" width="100%" alt="Eighteen tools look and five change things. With a view role, get_pods is allowed and delete_resource gets 403 Forbidden; with an edit role on one namespace, both are allowed there.">
+  <img src="docs/rbac.svg" width="100%" alt="Twenty-one tools look and nine change things. With a view role, get_pods is allowed and delete_resource gets 403 Forbidden; with an edit role on one namespace, both are allowed there.">
 </p>
 
 | | Tool | What it does |
@@ -70,21 +71,28 @@
 | 👀 | `describe_pod` | A pod's conditions, container states, restarts, last exit code and reason, resources and recent events (no environment variables) |
 | 👀 | `get_resource_usage` | CPU and memory for pods or nodes from metrics-server, nodes as a percent of allocatable |
 | 👀 | `get_cluster_info` | Version, nodes and namespaces at a glance |
+| 👀 | `get_resource` | Any kind, including custom resources (K3s `HelmChart`s, Traefik `IngressRoute`s, cert-manager `Certificate`s): list with Ready status, or one whole object. Secrets are refused. |
+| 👀 | `rollout_status` | Whether a Deployment, StatefulSet or DaemonSet has finished rolling out; can wait for it |
+| 👀 | `rollout_history` | A deployment's revisions with images and change cause |
 | ✏️ | `scale_deployment` | Set a deployment's replica count |
 | ✏️ | `restart_pod` | Delete a pod so its controller recreates it |
 | ✏️ | `execute_command` | Run a command in a pod's container |
 | ✏️ | `apply_manifest` | Server-side apply of YAML: create or update any kind, several documents at once, with dry run and conflict reporting |
 | ✏️ | `delete_resource` | Delete an object of any kind, by kind or short name (`deploy`, `cm`, `pvc`), with dry run |
+| ✏️ | `rollout_restart` | Restart a Deployment, StatefulSet or DaemonSet with a rolling update |
+| ✏️ | `rollout_undo` | Roll a deployment back to the previous revision or a chosen one |
+| ✏️ | `cordon_node` · `uncordon_node` | Stop or resume scheduling new pods on a node (opt-in RBAC, below) |
 
 <a id="safety"></a>
 
 ## 🔒 Safety
 
-There's **no read-only switch**. The server can do whatever the **kubeconfig** it uses is allowed to do, and five tools change things, including running commands inside containers. So don't hand it cluster-admin. [`deploy/rbac.yaml`](deploy/rbac.yaml) sets up a service account that can:
+There's **no read-only switch**. The server can do whatever the **kubeconfig** it uses is allowed to do, and nine tools change things, including running commands inside containers. So don't hand it cluster-admin. [`deploy/rbac.yaml`](deploy/rbac.yaml) sets up a service account that can:
 
 - **Read** across the cluster (the built-in **`view`** role, plus nodes). It can't read Secrets.
 - **Write** only in the namespaces you give an **`edit`** RoleBinding. The file binds `default`; change it, copy the block for more namespaces, or delete it for read-only. Writes anywhere else fail with `403 Forbidden` at the API server.
 - **Custom resources** only if their CRD opts in. `view` and `edit` include a custom resource only when its ClusterRoles aggregate into them, and many CRDs, Traefik's among them, don't. Grant those kinds with your own Role if you want the server to manage them.
+- **Nodes** stay read-only. `cordon_node` and `uncordon_node` need [`deploy/rbac-node-ops.yaml`](deploy/rbac-node-ops.yaml), an opt-in extra that lets the server patch nodes cluster-wide.
 
 Apply it with your admin kubeconfig, then build a kubeconfig for the server from the service account's token:
 
@@ -168,6 +176,7 @@ claude mcp add k3s --scope user -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" \
 | [CLIENTS.md](docs/CLIENTS.md) | Claude Code, Claude Desktop, several clusters, settings, troubleshooting |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How a call flows, namespace rules, every tool's API call and RBAC, known limits |
 | [deploy/rbac.yaml](deploy/rbac.yaml) | The service account, roles and bindings |
+| [deploy/rbac-node-ops.yaml](deploy/rbac-node-ops.yaml) | Optional: lets the server cordon and uncordon nodes |
 
 <a id="troubleshooting"></a>
 
@@ -207,10 +216,11 @@ Use absolute paths, check the config is valid JSON, and quit Claude Desktop comp
 ## 🧱 Project layout
 
 ```
-src/k3s_mcp_server/server.py   the server that gets packaged and installed (23 tools)
+src/k3s_mcp_server/server.py   the server that gets packaged and installed (30 tools)
 docs/                          QUICKSTART, CLIENTS and ARCHITECTURE guides, and the animations on this page
 scripts/                       setup.sh and test-connection.sh
 deploy/rbac.yaml               a least-privilege service account for the server
+deploy/rbac-node-ops.yaml      optional: node cordon and uncordon
 ```
 
 Dependencies: `mcp`, `kubernetes` (the official client) and `pyyaml`.
