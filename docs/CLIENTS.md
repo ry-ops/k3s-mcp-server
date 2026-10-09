@@ -71,10 +71,10 @@ The name shows up in the client, so you can say *"on k3s-prod, …"*. The server
 | Variable | Default | What it does |
 |---|---|---|
 | `KUBECONFIG` | `~/.kube/k3s-cortex-config.yaml` | The kubeconfig to load. If the file is missing, the server prints an error and exits at startup. Always set this; the default is a leftover name. |
-| `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools (`get_deployment`, `describe_pod`, `get_logs`, `scale_deployment`, `restart_pod`, `execute_command`, `delete_resource`) act when the call doesn't name a namespace. It's also where `apply_manifest` puts namespaced objects whose YAML has no namespace. |
+| `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools (`get_deployment`, `describe_pod`, `get_configmaps` with a name, `get_logs`, `scale_deployment`, `restart_pod`, `execute_command`, `delete_resource`) act when the call doesn't name a namespace. It's also where `apply_manifest` puts namespaced objects whose YAML has no namespace. |
 | `K3S_DEBUG` | `false` | `true` logs extra startup detail to stderr. |
 
-The list tools, `get_pods`, `get_deployments`, `get_services`, `get_events` and `get_resource_usage`, search **every namespace** when no namespace is given, whatever `K3S_DEFAULT_NAMESPACE` says.
+The list tools (`get_pods`, `get_deployments`, `get_statefulsets`, `get_daemonsets`, `get_jobs`, `get_cronjobs`, `get_services`, `get_ingresses`, `get_configmaps`, `get_pvcs`, `get_events` and `get_resource_usage`) search **every namespace** when no namespace is given, whatever `K3S_DEFAULT_NAMESPACE` says.
 
 ## Troubleshooting
 
@@ -92,8 +92,9 @@ If that passes, the problem is in the client config. If it fails, the error tell
 | Connection refused or timeouts | The kubeconfig's `server:` isn't reachable from this machine. K3s writes `https://127.0.0.1:6443`; change it to the node's address. Check with `nc -z <server-ip> 6443`. |
 | `403 Forbidden` | RBAC working as intended: this identity isn't allowed to do that. To allow writes in another namespace, add an `edit` RoleBinding there; see [`deploy/rbac.yaml`](../deploy/rbac.yaml). |
 | `Apply failed with 1 conflict` from `apply_manifest` | Another field manager owns that field, for example `replicas` after `scale_deployment`. Apply again with `force`, or leave the field out of the YAML. |
-| `The cluster has no kind … in …` | The `apiVersion` or `kind` is wrong, or the CRD isn't installed. |
-| `Unsupported resource kind for deletion` | `delete_resource` handles Pod, Deployment and Service only. |
+| `The cluster has no kind …` | The `apiVersion` or `kind` is wrong, or the CRD isn't installed. |
+| `… is ambiguous (…); pass api_version` | The kind exists in more than one API group. Name the one you mean, for example `api_version: events.k8s.io/v1`. |
+| `403` on a custom resource in a namespace you gave `edit` | The CRD doesn't aggregate into `edit`. Grant that kind with your own Role. |
 | `Metrics API not available` | `get_resource_usage` needs metrics-server. K3s ships it; on other clusters, install it. |
 | Tools don't appear | The JSON is invalid (check with `python3 -m json.tool <file>`), a path isn't absolute, or Claude Desktop wasn't fully quit. |
 | `AttributeError: 'Server' object has no attribute 'list_tools'` | An old checkout resolved `mcp` 2.x. Pull the latest code and run `uv sync`; `pyproject.toml` now pins `mcp<2`. |
