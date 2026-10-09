@@ -22,7 +22,7 @@ flowchart LR
 
 | Piece | What it does |
 |---|---|
-| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 32 tool definitions with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
+| **MCP server** | `mcp.server.Server` from the MCP Python SDK (pinned below 2.0). `list_tools` returns 34 tool definitions, or 36 with `K3S_PROVISIONING=true` with JSON Schemas. `call_tool` hands each call to the router. It runs over stdio until the client closes the pipe. |
 | **Tool router** | One `call_tool` function: fills in the default namespace, calls the matching `K3sClient` method, and formats the result. |
 | **`K3sClient`** | Loads the kubeconfig once and holds the API clients. The tools use `CoreV1Api`, `AppsV1Api`, `BatchV1Api`, `NetworkingV1Api`, `CustomObjectsApi` for metrics, and a `DynamicClient` for `apply_manifest`, `get_resource` and `delete_resource`, which is created on first use because it runs API discovery. Each method is a thin wrapper over one or two API calls that trims the response down to the fields worth reading. |
 | **Kubernetes API** | Does all the real work, including authentication and authorization. The server never checks permissions itself. |
@@ -31,7 +31,8 @@ flowchart LR
 
 1. The client runs `uv --directory <repo> run k3s-mcp-server`. That console script calls `run()`, which runs the async `main()`.
 2. Importing the module creates the single `K3sClient`, which loads `$KUBECONFIG` (default `~/.kube/config`) into its own `ApiClient`. A missing or unreadable file prints an error to stderr and **exits**. Every API client (core, apps, batch, networking, custom objects, dynamic, version) is built from that one `ApiClient`, so `use_cluster` can swap them all at once. Nothing is reported over MCP, so check the client's log.
-3. `main()` opens the stdio transport and serves requests. Everything the server prints goes to stderr, because stdout carries the protocol.
+3. The server's MCP `instructions`, sent to the client on connect, say that tool results follow the kubeconfig's RBAC, and whether cluster building (`K3S_PROVISIONING`) is on. While it's off, they tell the model how to enable it and not to build a cluster another way.
+4. `main()` opens the stdio transport and serves requests. Everything the server prints goes to stderr, because stdout carries the protocol.
 
 Loading the kubeconfig doesn't contact the cluster. An unreachable API server shows up as an error on the first tool call, not at startup.
 
@@ -90,6 +91,10 @@ sequenceDiagram
 | `rollout_history` | `read_namespaced_deployment` + `list_namespaced_replica_set` by the deployment's selector, kept if owned by it, keyed by `deployment.kubernetes.io/revision` | `get deployments.apps`, `list replicasets.apps` |
 | `get_cluster_info` | `VersionApi.get_code` + `list_node` + `list_namespace` | `list nodes`, `list namespaces` |
 | `list_clusters` | No API call: reads the kubeconfigs in `K3S_KUBECONFIG_DIR` (skipping `*-admin.yaml`) plus `KUBECONFIG`, and returns each current context's server and namespace | none |
+| `list_distributions` | No cluster call: reads K3s's release channels from `update.k3s.io` | none |
+| `cluster_status` | `list_node` + `VersionApi.get_code` with the cluster's scoped kubeconfig, without switching | `list nodes` |
+| `plan_cluster` | No cluster call: one SSH command per node (`ssh -o BatchMode=yes`) reading CPUs, RAM, OS, hostname, `sudo -n`, `curl`, an existing K3s, and HTTPS to `get.k3s.io` | SSH as the user (outside RBAC) |
+| `create_cluster` | Over SSH: write `/etc/rancher/k3s/config.yaml` from stdin (mode 600), run the K3s installer as server, then agents in parallel; read the admin kubeconfig. Then with that kubeconfig: wait for nodes Ready and CoreDNS, server-side apply the `deploy/rbac.yaml` objects, read the service account token, and write both kubeconfigs (mode 600) | root over SSH, then cluster-admin on the new cluster |
 | `use_cluster` | `new_client_from_config` for that file, then `VersionApi.get_code` to check it; only on success are the API clients swapped | whatever the new file's identity has |
 | `scale_deployment` | `patch_namespaced_deployment_scale` | `patch deployments.apps/scale` |
 | `restart_pod` | `delete_namespaced_pod`; the owning controller re-creates it | `delete pods` |
@@ -109,6 +114,7 @@ The server holds no secrets of its own and adds no permission checks. **The kube
 - Give the server a scoped service account, not cluster-admin. See the README's [Safety](../README.md#safety) section.
 - Keep tool approval on in your MCP client, so a person sees each write before it runs.
 - The kubeconfig holds a bearer token. Keep it at mode `600`; deleting the `k3s-mcp-token` Secret revokes it.
+- **The one exception to RBAC as the boundary is cluster building.** `plan_cluster` and `create_cluster` act over SSH with your key and `sudo`, so no kubeconfig limits them. They're absent unless `K3S_PROVISIONING=true`, and the SSH user and hosts you allow are the boundary. Join tokens and kubeconfigs are written to disk, never returned.
 
 ## Known limits
 
@@ -117,6 +123,7 @@ These are properties of the current code, not of Kubernetes:
 - **`apply_manifest` needs a name.** Server-side apply addresses objects by name, so `generateName` isn't supported.
 - **No log following.** `get_logs` returns the last *N* lines.
 - **Rollbacks are for Deployments.** `rollout_undo` and `rollout_history` read ReplicaSets; StatefulSet and DaemonSet history (ControllerRevisions) isn't covered.
+- **Building is K3s-only, single control plane, with no teardown tool.** See [PROVISIONING.md](PROVISIONING.md#limits-in-this-release).
 - **No drain.** `cordon_node` stops scheduling; evicting running pods is left to you.
 - **Usage needs metrics-server.** K3s bundles it; on other clusters `get_resource_usage` returns *Metrics API not available* until it's installed.
 - **Blocking calls.** The Kubernetes client is synchronous and is called directly from async handlers, so one slow API call holds up the next. That's fine for one client issuing one call at a time, which is how MCP clients use it.

@@ -80,7 +80,8 @@ The name shows up in the client, so you can say *"on k3s-prod, …"*. The server
 |---|---|---|
 | `KUBECONFIG` | `~/.kube/config` | The kubeconfig to load. If the file is missing, the server prints an error and exits at startup. Set it to the scoped kubeconfig, not your admin one. |
 | `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools (`get_deployment`, `describe_pod`, `get_configmaps` with a name, `get_logs`, `scale_deployment`, `restart_pod`, `execute_command`, `delete_resource`) act when the call doesn't name a namespace. It's also where `apply_manifest` puts namespaced objects whose YAML has no namespace. |
-| `K3S_KUBECONFIG_DIR` | `~/.kube/clusters` | Folder of kubeconfigs for `list_clusters` and `use_cluster`. `*-admin.yaml` files are skipped. A missing folder just means one cluster. |
+| `K3S_KUBECONFIG_DIR` | `~/.kube/clusters` | Folder of kubeconfigs for `list_clusters` and `use_cluster`, and where `create_cluster` writes. `*-admin.yaml` files are skipped. A missing folder just means one cluster. |
+| `K3S_PROVISIONING` | `false` | `true` adds `plan_cluster` and `create_cluster`. They run commands as root over SSH with your key, outside any kubeconfig's RBAC. See [PROVISIONING.md](PROVISIONING.md). |
 | `K3S_DEBUG` | `false` | `true` logs extra startup detail to stderr. |
 
 The list tools (`get_pods`, `get_deployments`, `get_statefulsets`, `get_daemonsets`, `get_jobs`, `get_cronjobs`, `get_services`, `get_ingresses`, `get_configmaps`, `get_pvcs`, `get_events` and `get_resource_usage`) search **every namespace** when no namespace is given, whatever `K3S_DEFAULT_NAMESPACE` says.
@@ -106,6 +107,9 @@ If that passes, the problem is in the client config. If it fails, the error tell
 | `403` from `cordon_node` or `uncordon_node` | Expected with `deploy/rbac.yaml` alone. Apply `deploy/rbac-node-ops.yaml` to allow it. |
 | `rollout_status` says the rollout exceeded its progress deadline | New pods never became available, often because of a bad image or failing probes. Check `describe_pod` on a new pod, then `rollout_undo`. |
 | `403` on a custom resource in a namespace you gave `edit` | The CRD doesn't aggregate into `edit`. Grant that kind with your own Role. |
+| `plan_cluster is disabled` | Set `K3S_PROVISIONING=true` in the server's environment and restart the client. |
+| `plan_cluster found blockers` | `create_cluster` refuses until every node passes: SSH as the user, passwordless sudo, `curl`, a route to `get.k3s.io`, no K3s already installed. `plan_cluster` names each problem per node. |
+| `… already exists; pick another name` | A kubeconfig for that cluster name is already in the folder. Pick another name, or delete the old cluster's two files. |
 | `No cluster named …` from `use_cluster` | The name isn't a file in `K3S_KUBECONFIG_DIR` (without `.yaml`), or it ends in `-admin`. `list_clusters` shows the valid names. |
 | `Couldn't connect to …, so … stays active` | That kubeconfig's API server isn't reachable or its token was revoked. Nothing changed; fix the file and try again. |
 | `Metrics API not available` | `get_resource_usage` needs metrics-server. K3s ships it; on other clusters, install it. |
