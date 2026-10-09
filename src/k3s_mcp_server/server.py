@@ -9,13 +9,13 @@ GitHub: https://github.com/ry-ops/k3s-mcp-server
 Documentation: https://github.com/ry-ops/k3s-mcp-server#readme
 
 Configuration via environment variables:
-    KUBECONFIG: Path to kubeconfig file (default: ~/.kube/k3s-cortex-config.yaml)
+    KUBECONFIG: Path to kubeconfig file (default: ~/.kube/config)
     K3S_DEFAULT_NAMESPACE: Default namespace for operations (default: default)
     K3S_DEBUG: Enable debug logging (default: false)
 
 Author: ry-ops
 License: MIT
-Version: 1.4.0
+Version: 1.4.1
 """
 
 import os
@@ -43,7 +43,7 @@ from k3s_mcp_server import __version__
 
 
 # Configuration
-KUBECONFIG = os.getenv("KUBECONFIG", str(Path.home() / ".kube" / "k3s-cortex-config.yaml"))
+KUBECONFIG = os.getenv("KUBECONFIG", str(Path.home() / ".kube" / "config"))
 DEFAULT_NAMESPACE = os.getenv("K3S_DEFAULT_NAMESPACE", "default")
 DEBUG = os.getenv("K3S_DEBUG", "false").lower() == "true"
 
@@ -1881,9 +1881,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
+        # Raising lets the MCP SDK return the message with isError: true, so
+        # clients can tell a failure from a result without parsing the text
         error_msg = f"Error executing {name}: {str(e)}"
         print(error_msg, file=sys.stderr)
-        return [TextContent(type="text", text=error_msg)]
+        raise Exception(error_msg) from e
 
 
 async def main():

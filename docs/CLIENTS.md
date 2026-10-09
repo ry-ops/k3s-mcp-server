@@ -70,7 +70,7 @@ The name shows up in the client, so you can say *"on k3s-prod, …"*. The server
 
 | Variable | Default | What it does |
 |---|---|---|
-| `KUBECONFIG` | `~/.kube/k3s-cortex-config.yaml` | The kubeconfig to load. If the file is missing, the server prints an error and exits at startup. Always set this; the default is a leftover name. |
+| `KUBECONFIG` | `~/.kube/config` | The kubeconfig to load. If the file is missing, the server prints an error and exits at startup. Set it to the scoped kubeconfig, not your admin one. |
 | `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools (`get_deployment`, `describe_pod`, `get_configmaps` with a name, `get_logs`, `scale_deployment`, `restart_pod`, `execute_command`, `delete_resource`) act when the call doesn't name a namespace. It's also where `apply_manifest` puts namespaced objects whose YAML has no namespace. |
 | `K3S_DEBUG` | `false` | `true` logs extra startup detail to stderr. |
 
@@ -88,7 +88,7 @@ If that passes, the problem is in the client config. If it fails, the error tell
 
 | Symptom | Cause and fix |
 |---|---|
-| `Kubeconfig not found at …` in the client's log | `KUBECONFIG` isn't set or isn't an absolute path. Without it the server falls back to `~/.kube/k3s-cortex-config.yaml`. |
+| `Kubeconfig not found at …` in the client's log | `KUBECONFIG` isn't set or isn't an absolute path. Without it the server falls back to `~/.kube/config`. |
 | Connection refused or timeouts | The kubeconfig's `server:` isn't reachable from this machine. K3s writes `https://127.0.0.1:6443`; change it to the node's address. Check with `nc -z <server-ip> 6443`. |
 | `403 Forbidden` | RBAC working as intended: this identity isn't allowed to do that. To allow writes in another namespace, add an `edit` RoleBinding there; see [`deploy/rbac.yaml`](../deploy/rbac.yaml). |
 | `Apply failed with 1 conflict` from `apply_manifest` | Another field manager owns that field, for example `replicas` after `scale_deployment`. Apply again with `force`, or leave the field out of the YAML. |

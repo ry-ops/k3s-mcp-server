@@ -18,7 +18,8 @@
   <a href="#safety">Safety</a> ·
   <a href="#setup">Setup</a> ·
   <a href="#guides">Guides</a> ·
-  <a href="#troubleshooting">Troubleshooting</a>
+  <a href="#troubleshooting">Troubleshooting</a> ·
+  <a href="#upcoming">Upcoming</a>
 </p>
 
 ---
@@ -162,7 +163,7 @@ claude mcp add k3s --scope user -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" \
 
 | Variable | Default | What it does |
 |---|---|---|
-| `KUBECONFIG` | `~/.kube/k3s-cortex-config.yaml` | The kubeconfig to use; its current context and RBAC decide what the server can reach. **Set it.** The default is a leftover name, not the usual `~/.kube/config`. |
+| `KUBECONFIG` | `~/.kube/config` | The kubeconfig to use; its current context and RBAC decide what the server can reach. Point it at the scoped kubeconfig from [Safety](#safety), not your admin one. |
 | `K3S_DEFAULT_NAMESPACE` | `default` | Where single-object tools act when a call doesn't name a namespace. List tools search all namespaces instead. |
 | `K3S_DEBUG` | `false` | Extra startup logging to stderr |
 
@@ -185,7 +186,7 @@ claude mcp add k3s --scope user -e KUBECONFIG="$HOME/.kube/k3s-mcp.yaml" \
 <details>
 <summary><b>"Kubeconfig not found"</b></summary>
 
-Set `KUBECONFIG` to an absolute path. Without it, the server looks for `~/.kube/k3s-cortex-config.yaml`.
+Set `KUBECONFIG` to an absolute path. Without it, the server looks for `~/.kube/config`.
 </details>
 
 <details>
@@ -213,6 +214,19 @@ Another field manager owns that field. A common case: you scaled a deployment wi
 Use absolute paths, check the config is valid JSON, and quit Claude Desktop completely before reopening it. Then check the client's log for the server's stderr. More in [CLIENTS.md](docs/CLIENTS.md#troubleshooting).
 </details>
 
+<a id="upcoming"></a>
+
+## 🗺️ Upcoming
+
+Planned, not built yet:
+
+- [ ] **Tests and CI.** A pytest suite for the server's logic (rollout rules, kind lookup, apply results, the Secrets refusal) and a workflow that runs lint and tests on every pull request.
+- [ ] **Switch clusters without a restart.** `list_clusters` and `use_cluster` over a folder of kubeconfigs, each with its own scoped identity.
+- [ ] **Follow logs.** Stream new lines from a pod instead of returning the last *N*.
+- [ ] **Drain nodes.** Evict a node's pods after `cordon_node`, respecting PodDisruptionBudgets.
+- [ ] **Roll back StatefulSets and DaemonSets.** `rollout_history` and `rollout_undo` from their ControllerRevisions; today they cover Deployments only.
+- [ ] **Secret metadata.** Names, types and key names for Secrets. Their values stay out of the conversation on purpose.
+
 ## 🧱 Project layout
 
 ```
@@ -224,10 +238,6 @@ deploy/rbac-node-ops.yaml      optional: node cordon and uncordon
 ```
 
 Dependencies: `mcp`, `kubernetes` (the official client) and `pyyaml`.
-
-## 🌐 Origins
-
-Built as one of the infrastructure tools for the [Cortex](https://github.com/ry-ops/cortex) platform, which is now archived. The server doesn't depend on Cortex and runs against any cluster.
 
 ## License
 

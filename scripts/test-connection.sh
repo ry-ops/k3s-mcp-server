@@ -10,13 +10,13 @@ echo "=================================================="
 echo ""
 
 # Check for kubeconfig
-KUBECONFIG_PATH="${KUBECONFIG:-$HOME/.kube/k3s-cortex-config.yaml}"
+KUBECONFIG_PATH="${KUBECONFIG:-$HOME/.kube/config}"
 
 if [ ! -f "$KUBECONFIG_PATH" ]; then
     echo "Error: Kubeconfig not found at $KUBECONFIG_PATH"
     echo ""
-    echo "Please set KUBECONFIG environment variable or place kubeconfig at:"
-    echo "  $HOME/.kube/k3s-cortex-config.yaml"
+    echo "Set the KUBECONFIG environment variable, or place your kubeconfig at:"
+    echo "  $HOME/.kube/config"
     exit 1
 fi
 
@@ -71,7 +71,7 @@ import asyncio
 from pathlib import Path
 
 # Set kubeconfig
-kubeconfig_path = os.getenv("KUBECONFIG", str(Path.home() / ".kube" / "k3s-cortex-config.yaml"))
+kubeconfig_path = os.getenv("KUBECONFIG", str(Path.home() / ".kube" / "config"))
 os.environ["KUBECONFIG"] = kubeconfig_path
 
 print(f"Using kubeconfig: {kubeconfig_path}")
