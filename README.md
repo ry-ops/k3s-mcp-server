@@ -4,14 +4,14 @@
 
 <p align="center">
   <a href="https://github.com/ry-ops/k3s-mcp-server/releases/latest"><img src="https://img.shields.io/github/v/release/ry-ops/k3s-mcp-server?color=3fd68b" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/tools-13-ffc61c" alt="13 tools">
+  <img src="https://img.shields.io/badge/tools-16-ffc61c" alt="16 tools">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-3ec7ff" alt="Python 3.10+"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-stdio-b58cff" alt="MCP"></a>
   <a href="https://k3s.io/"><img src="https://img.shields.io/badge/K3s-and%20any%20Kubernetes-ff8a1f" alt="K3s"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b96ad" alt="MIT"></a>
 </p>
 
-<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 13 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
+<p align="center"><b>Run your Kubernetes cluster from a conversation.</b> An MCP server that gives Claude, or any MCP client, 16 tools for K3s, built on the official Kubernetes Python client and your kubeconfig. It works with any Kubernetes cluster, not just K3s.</p>
 
 <p align="center">
   <a href="#tools">Tools</a> ·
@@ -36,7 +36,9 @@
 
 ## 🌟 Why this one
 
-- **Reads and writes, 13 tools.** Pods, deployments, services, nodes, namespaces and logs to look; scale, restart, exec, create and delete to act.
+- **Reads and writes, 16 tools.** Pods, deployments, services, nodes, namespaces and logs to look; scale, restart, exec, apply and delete to act.
+- **Built for troubleshooting.** Events, a pod's container states and exit codes, logs from the crashed container, and live CPU and memory from metrics-server, so *"why is this pod crash-looping?"* gets a real answer.
+- **Apply like kubectl.** `apply_manifest` uses server-side apply: it creates or updates, takes several YAML documents at once, handles any kind including custom resources, and has a dry run.
 - **Least privilege, ready to apply.** [`deploy/rbac.yaml`](deploy/rbac.yaml) gives the server its own service account: it can read everywhere, write only in the namespaces you pick, and never read Secrets outside them. Delete one Secret to cut it off.
 - **Cluster-wide by default.** List tools search every namespace unless you name one, and label selectors narrow them down.
 - **Any client, any number of clusters.** Works with Claude Code, Claude Desktop or any stdio MCP client. Register it once per kubeconfig and say *"on k3s-prod, …"*.
@@ -48,7 +50,7 @@
 ## 🧰 Tools
 
 <p align="center">
-  <img src="docs/rbac.svg" width="100%" alt="Eight tools look and five change things. With a view role, get_pods is allowed and delete_resource gets 403 Forbidden; with an edit role on one namespace, both are allowed there.">
+  <img src="docs/rbac.svg" width="100%" alt="Eleven tools look and five change things. With a view role, get_pods is allowed and delete_resource gets 403 Forbidden; with an edit role on one namespace, both are allowed there.">
 </p>
 
 | | Tool | What it does |
@@ -58,12 +60,15 @@
 | 👀 | `get_services` | Services in one namespace or all of them |
 | 👀 | `get_nodes` | Nodes with roles, Ready and pressure conditions, versions, OS and capacity |
 | 👀 | `get_namespaces` | All namespaces |
-| 👀 | `get_logs` | A pod's logs; choose the container and how many lines to tail |
+| 👀 | `get_logs` | A pod's logs; choose the container and how many lines to tail, or read the previous (crashed) container's logs |
+| 👀 | `get_events` | Events, newest first, filtered by namespace, object, kind or `Warning` |
+| 👀 | `describe_pod` | A pod's conditions, container states, restarts, last exit code and reason, resources and recent events (no environment variables) |
+| 👀 | `get_resource_usage` | CPU and memory for pods or nodes from metrics-server, nodes as a percent of allocatable |
 | 👀 | `get_cluster_info` | Version, nodes and namespaces at a glance |
 | ✏️ | `scale_deployment` | Set a deployment's replica count |
 | ✏️ | `restart_pod` | Delete a pod so its controller recreates it |
 | ✏️ | `execute_command` | Run a command in a pod's container |
-| ✏️ | `apply_manifest` | Create a Pod, Deployment or Service from YAML (create only; an existing name returns `409`) |
+| ✏️ | `apply_manifest` | Server-side apply of YAML: create or update any kind, several documents at once, with dry run and conflict reporting |
 | ✏️ | `delete_resource` | Delete a Pod, Deployment or Service |
 
 <a id="safety"></a>
@@ -182,9 +187,9 @@ That's RBAC working. The kubeconfig's identity isn't allowed to do that. To allo
 </details>
 
 <details>
-<summary><b>409 Conflict from apply_manifest</b></summary>
+<summary><b>Apply failed with a conflict</b></summary>
 
-The object already exists. `apply_manifest` only creates; use `scale_deployment`, or delete and re-create.
+Another field manager owns that field. A common case: you scaled a deployment with `scale_deployment`, then applied YAML with a different `replicas`. Ask to apply again with `force` to take the field over, or drop it from the YAML.
 </details>
 
 <details>
@@ -196,7 +201,7 @@ Use absolute paths, check the config is valid JSON, and quit Claude Desktop comp
 ## 🧱 Project layout
 
 ```
-src/k3s_mcp_server/server.py   the server that gets packaged and installed (13 tools)
+src/k3s_mcp_server/server.py   the server that gets packaged and installed (16 tools)
 docs/                          QUICKSTART, CLIENTS and ARCHITECTURE guides, and the animations on this page
 scripts/                       setup.sh and test-connection.sh
 deploy/rbac.yaml               a least-privilege service account for the server
