@@ -29,7 +29,6 @@ ENV/
 env/
 
 # uv
-uv.lock
 .uv/
 
 # IDEs

@@ -45,18 +45,15 @@ echo "✓ Dependencies installed"
 echo ""
 echo "Checking for kubeconfig..."
 
-KUBECONFIG_PATH="${KUBECONFIG:-$HOME/.kube/k3s-cortex-config.yaml}"
+KUBECONFIG_PATH="${KUBECONFIG:-$HOME/.kube/config}"
 
 if [ -f "$KUBECONFIG_PATH" ]; then
     echo "✓ Found kubeconfig at $KUBECONFIG_PATH"
 else
     echo "⚠ Kubeconfig not found at $KUBECONFIG_PATH"
     echo ""
-    echo "Please ensure your kubeconfig is at one of these locations:"
-    echo "  - $HOME/.kube/k3s-cortex-config.yaml (default)"
-    echo "  - $HOME/.kube/config"
-    echo ""
-    echo "Or set the KUBECONFIG environment variable to your kubeconfig path"
+    echo "Put your kubeconfig at $HOME/.kube/config, or set the KUBECONFIG"
+    echo "environment variable to its path."
 fi
 
 echo ""

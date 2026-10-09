@@ -30,7 +30,7 @@ flowchart LR
 ## Startup
 
 1. The client runs `uv --directory <repo> run k3s-mcp-server`. That console script calls `run()`, which runs the async `main()`.
-2. Importing the module creates the single `K3sClient`, which loads `$KUBECONFIG` (default `~/.kube/k3s-cortex-config.yaml`). A missing or unreadable file prints an error to stderr and **exits**. Nothing is reported over MCP, so check the client's log.
+2. Importing the module creates the single `K3sClient`, which loads `$KUBECONFIG` (default `~/.kube/config`). A missing or unreadable file prints an error to stderr and **exits**. Nothing is reported over MCP, so check the client's log.
 3. `main()` opens the stdio transport and serves requests. Everything the server prints goes to stderr, because stdout carries the protocol.
 
 Loading the kubeconfig doesn't contact the cluster. An unreachable API server shows up as an error on the first tool call, not at startup.
@@ -49,7 +49,7 @@ sequenceDiagram
     K->>A: PATCH apps/v1 …/deployments/web/scale
     A-->>K: 200, or 403 / 404
     K-->>R: dict, or raises
-    R-->>C: TextContent: JSON, or "Error executing scale_deployment: …"
+    R-->>C: JSON, or isError with "Error executing scale_deployment: …"
 ```
 
 ### Namespaces
@@ -62,7 +62,7 @@ sequenceDiagram
 
 - Structured results are returned as pretty-printed JSON in a single `TextContent`. Logs and command output come back as plain text.
 - `apply_manifest` reports each document separately: `created`, `configured`, `unchanged`, or the API server's error message. One failing document doesn't stop the rest.
-- Any other exception, whether an API error, unsupported kind or bad YAML, is caught and returned as text: `Error executing <tool>: <message>`, with the HTTP status (for example `(403) Reason: Forbidden`). The call doesn't set the MCP `isError` flag, so clients see errors as ordinary text.
+- Any other exception, whether an API error, unsupported kind or bad YAML, becomes an MCP error result: `isError: true` with the text `Error executing <tool>: <message>`, including the HTTP status or the API server's message (for example `(403) Reason: Forbidden`). Arguments that don't match a tool's input schema are rejected the same way before the tool runs.
 
 ## Tools and the API calls behind them
 
@@ -118,7 +118,6 @@ These are properties of the current code, not of Kubernetes:
 - **No drain.** `cordon_node` stops scheduling; evicting running pods is left to you.
 - **Usage needs metrics-server.** K3s bundles it; on other clusters `get_resource_usage` returns *Metrics API not available* until it's installed.
 - **Blocking calls.** The Kubernetes client is synchronous and is called directly from async handlers, so one slow API call holds up the next. That's fine for one client issuing one call at a time, which is how MCP clients use it.
-- **Errors aren't flagged.** Failures come back as normal text, not with `isError: true`.
 
 ## Repository layout
 
